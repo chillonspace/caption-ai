@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const PRODUCTS = ['AirVo', 'TriGuard', 'FloMix', 'TrioCare', 'FleXa'];
@@ -18,6 +18,24 @@ export default function CaptionPage() {
 
   const current = captions[idx] ?? '';
 
+  // Remember last selections
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('caption:prefs') || 'null');
+      if (saved) {
+        if (saved.product) setProduct(saved.product);
+        if (saved.tone) setTone(saved.tone);
+        if (saved.platform) setPlatform(saved.platform);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('caption:prefs', JSON.stringify({ product, tone, platform }));
+    } catch {}
+  }, [product, tone, platform]);
+
   async function handleGenerate() {
     if (!product || !tone) return;
     setLoading(true);
@@ -26,33 +44,15 @@ export default function CaptionPage() {
     setHint('');
 
     try {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      const res = await fetch('/api/generate', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            {
-              role: 'system',
-              content: `你是资深中文社媒文案助手，面向马来西亚 30~55 岁用户。请用【中文为主】，可少量 EN/BM 混搭（<=15%），每条【≤1 个 emoji】，且【必须包含明确 CTA】（如：私讯我、留言"我要"、点击链接等）。输出三条不同文案。`,
-            },
-            {
-              role: 'user',
-              content: `产品: ${product}\n风格: ${tone}\n平台: ${platform}`,
-            },
-          ],
-          temperature: 0.7,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product, tone, platform }),
       });
 
+      if (!res.ok) throw new Error('Bad response');
       const data = await res.json();
-      let text = data?.choices?.[0]?.message?.content ?? '';
-
-      // 简单切割成数组
-      let result = text.split(/\n+/).filter((t: string) => t.trim()).slice(0, 3);
+      const result: string[] = Array.isArray(data?.captions) ? data.captions : [];
       setCaptions(result);
     } catch (e) {
       setHint('生成失败，请重试');
@@ -101,12 +101,12 @@ export default function CaptionPage() {
   const prevCaption = () => setIdx((idx - 1 + captions.length) % captions.length);
 
   return (
-    <div style={containerStyle}>
+    <div style={containerStyle} className="safe-area-bottom">
       <div style={mainStyle}>
         {/* Header */}
         <header style={headerStyle}>
           <h1 style={titleStyle}>生成社媒文案</h1>
-          <p style={subtitleStyle}>选择产品、风格与平台，点击生成</p>
+          <p style={subtitleStyle}>选择产品、风格与平台，点击生成。</p>
         </header>
 
         {/* Input Card */}
@@ -114,15 +114,15 @@ export default function CaptionPage() {
           style={cardStyle}
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
+          transition={{ duration: 0.26, ease: 'easeOut' }}
         >
           <div style={inputGroupStyle}>
             <select
               value={product}
               onChange={(e) => setProduct(e.target.value)}
-              style={selectStyle}
+              style={{ ...selectStyle, color: product ? 'var(--text)' : 'var(--text-muted)' }}
             >
-              <option value="">请选择产品</option>
+              <option value="" disabled>请选择产品</option>
               {PRODUCTS.map((p) => (
                 <option key={p} value={p}>{p}</option>
               ))}
@@ -131,9 +131,9 @@ export default function CaptionPage() {
             <select
               value={tone}
               onChange={(e) => setTone(e.target.value)}
-              style={selectStyle}
+              style={{ ...selectStyle, color: tone ? 'var(--text)' : 'var(--text-muted)' }}
             >
-              <option value="">请选择风格</option>
+              <option value="" disabled>请选择风格</option>
               {STYLES.map((s) => (
                 <option key={s} value={s}>{s}</option>
               ))}
@@ -142,7 +142,7 @@ export default function CaptionPage() {
             <select
               value={platform}
               onChange={(e) => setPlatform(e.target.value)}
-              style={selectStyle}
+              style={{ ...selectStyle, color: platform ? 'var(--text)' : 'var(--text-muted)' }}
             >
               {PLATFORMS.map((p) => (
                 <option key={p} value={p}>{p}</option>
@@ -156,13 +156,15 @@ export default function CaptionPage() {
                 cursor: !product || !tone || loading ? 'not-allowed' : 'pointer',
               }}
               whileTap={{ scale: 0.98 }}
-              whileHover={{ scale: loading ? 1 : 1.02 }}
+              whileHover={{ y: loading ? 0 : -2 }}
               onClick={handleGenerate}
               disabled={!product || !tone || loading}
             >
               {loading ? '生成中…' : '生成文案'}
             </motion.button>
           </div>
+          {/* Divider */}
+          <div style={dividerStyle} />
         </motion.div>
 
         {/* Loading Skeleton */}
@@ -171,15 +173,15 @@ export default function CaptionPage() {
             style={cardStyle}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
+            transition={{ delay: 0.12 }}
           >
             <div style={skeletonContainerStyle}>
-              {[...Array(3)].map((_, i) => (
+              {[100, 88, 70].map((w, i) => (
                 <motion.div
                   key={i}
-                  style={skeletonBarStyle}
+                  style={{ ...skeletonBarStyle, width: `${w}%` }}
                   animate={{ opacity: [0.3, 0.7, 0.3] }}
-                  transition={{ duration: 1.5, repeat: Infinity, delay: i * 0.2 }}
+                  transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.18 }}
                 />
               ))}
             </div>
@@ -194,7 +196,7 @@ export default function CaptionPage() {
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -30 }}
-              transition={{ duration: 0.4 }}
+              transition={{ duration: 0.22 }}
             >
               {/* Navigation */}
               <div style={navStyle}>
@@ -213,7 +215,7 @@ export default function CaptionPage() {
                       key={i}
                       style={{
                         ...dotStyle,
-                        backgroundColor: i === idx ? '#1877F2' : '#E5E7EB',
+                        backgroundColor: i === idx ? 'var(--primary)' : '#D1D5DB',
                       }}
                       whileTap={{ scale: 0.8 }}
                       onClick={() => setIdx(i)}
@@ -237,10 +239,10 @@ export default function CaptionPage() {
                   <motion.div
                     key={idx}
                     style={captionTextStyle}
-                    initial={{ opacity: 0, x: 30 }}
+                    initial={{ opacity: 0, x: 16 }}
                     animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -30 }}
-                    transition={{ duration: 0.3 }}
+                    exit={{ opacity: 0, x: -16 }}
+                    transition={{ duration: 0.18 }}
                   >
                     {current}
                   </motion.div>
@@ -277,12 +279,12 @@ export default function CaptionPage() {
             <motion.div
               style={{
                 ...hintStyle,
-                color: hint.includes('失败') ? '#DC2626' : '#059669',
+                color: hint.includes('失败') ? 'var(--error)' : 'var(--success)',
               }}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.3 }}
+              transition={{ duration: 0.22 }}
             >
               {hint}
             </motion.div>
@@ -295,8 +297,8 @@ export default function CaptionPage() {
 
 // Styles
 const containerStyle: React.CSSProperties = {
-  minHeight: '100vh',
-  backgroundColor: '#FAFAFA',
+  minHeight: '100dvh',
+  backgroundColor: 'var(--bg-page)',
   display: 'flex',
   justifyContent: 'center',
   padding: '20px 16px',
@@ -316,23 +318,24 @@ const headerStyle: React.CSSProperties = {
 };
 
 const titleStyle: React.CSSProperties = {
-  fontSize: '24px',
+  fontSize: 'clamp(20px, 4.5vw, 22px)',
   fontWeight: 'bold',
-  color: '#111827',
+  color: 'var(--text)',
   margin: '0 0 8px 0',
 };
 
 const subtitleStyle: React.CSSProperties = {
-  fontSize: '16px',
-  color: '#6B7280',
+  fontSize: 'clamp(13px, 3.6vw, 15px)',
+  color: 'var(--text-muted)',
   margin: 0,
 };
 
 const cardStyle: React.CSSProperties = {
-  backgroundColor: 'white',
-  borderRadius: '24px',
-  padding: '28px',
-  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+  backgroundColor: 'var(--bg-card)',
+  borderRadius: '18px',
+  padding: '24px',
+  border: '1px solid var(--border)',
+  boxShadow: 'var(--shadow-soft)',
 };
 
 const inputGroupStyle: React.CSSProperties = {
@@ -345,9 +348,9 @@ const selectStyle: React.CSSProperties = {
   height: '52px',
   fontSize: '16px',
   padding: '0 16px',
-  border: '2px solid #E5E7EB',
-  borderRadius: '16px',
-  backgroundColor: 'white',
+  border: '1px solid var(--border)',
+  borderRadius: '12px',
+  backgroundColor: 'var(--bg-card)',
   cursor: 'pointer',
   outline: 'none',
   transition: 'border-color 0.2s',
@@ -355,12 +358,12 @@ const selectStyle: React.CSSProperties = {
 
 const buttonStyle: React.CSSProperties = {
   height: '56px',
-  fontSize: '17px',
+  fontSize: '15px',
   fontWeight: '600',
-  backgroundColor: '#1877F2',
+  backgroundColor: 'var(--primary)',
   color: 'white',
   border: 'none',
-  borderRadius: '16px',
+  borderRadius: '14px',
   cursor: 'pointer',
   transition: 'all 0.2s',
 };
@@ -376,8 +379,8 @@ const navButtonStyle: React.CSSProperties = {
   width: '44px',
   height: '44px',
   borderRadius: '12px',
-  border: '2px solid #E5E7EB',
-  backgroundColor: 'white',
+  border: '1px solid var(--border)',
+  backgroundColor: 'var(--bg-card)',
   fontSize: '18px',
   cursor: 'pointer',
   display: 'flex',
@@ -392,8 +395,8 @@ const dotsStyle: React.CSSProperties = {
 };
 
 const dotStyle: React.CSSProperties = {
-  width: '10px',
-  height: '10px',
+  width: '6px',
+  height: '6px',
   borderRadius: '50%',
   cursor: 'pointer',
   transition: 'background-color 0.2s',
@@ -406,13 +409,13 @@ const captionContainerStyle: React.CSSProperties = {
 };
 
 const captionTextStyle: React.CSSProperties = {
-  fontSize: '16px',
-  lineHeight: '1.6',
-  color: '#374151',
-  backgroundColor: '#F9FAFB',
-  padding: '20px',
-  borderRadius: '16px',
-  border: '1px solid #E5E7EB',
+  fontSize: 'clamp(15px, 3.8vw, 16px)',
+  lineHeight: 1.55,
+  color: 'var(--text)',
+  backgroundColor: 'var(--bg-soft)',
+  padding: '16px',
+  borderRadius: '12px',
+  border: '1px solid var(--border)',
 };
 
 const actionButtonsStyle: React.CSSProperties = {
@@ -423,24 +426,24 @@ const actionButtonsStyle: React.CSSProperties = {
 
 const copyButtonStyle: React.CSSProperties = {
   height: '48px',
-  fontSize: '16px',
+  fontSize: '15px',
   fontWeight: '500',
   backgroundColor: 'white',
-  color: '#374151',
-  border: '2px solid #E5E7EB',
-  borderRadius: '14px',
+  color: 'var(--text)',
+  border: '1px solid #CBD5E1',
+  borderRadius: '12px',
   cursor: 'pointer',
   transition: 'all 0.2s',
 };
 
 const shareButtonStyle: React.CSSProperties = {
   height: '48px',
-  fontSize: '16px',
+  fontSize: '15px',
   fontWeight: '500',
   backgroundColor: '#111827',
   color: 'white',
   border: 'none',
-  borderRadius: '14px',
+  borderRadius: '12px',
   cursor: 'pointer',
   transition: 'all 0.2s',
 };
@@ -462,4 +465,10 @@ const hintStyle: React.CSSProperties = {
   fontSize: '14px',
   textAlign: 'center',
   fontWeight: '500',
+};
+
+const dividerStyle: React.CSSProperties = {
+  height: '1px',
+  backgroundColor: 'var(--divider)',
+  marginTop: '16px',
 };
