@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { createClient } from '@/lib/supabase/client';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const PRODUCTS = ['AirVo', 'TriGuard', 'FloMix', 'TrioCare', 'FleXa'];
@@ -8,6 +9,7 @@ const STYLES = ['朋友介绍口吻', '推销口吻'];
 const PLATFORMS = ['Facebook'];
 
 export default function CaptionPage() {
+  const sb = createClient();
   const [product, setProduct] = useState('');
   const [tone, setTone] = useState('');
   const [platform, setPlatform] = useState('Facebook');
@@ -15,8 +17,45 @@ export default function CaptionPage() {
   const [captions, setCaptions] = useState<string[]>([]);
   const [idx, setIdx] = useState(0);
   const [hint, setHint] = useState('');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [lang, setLang] = useState<'zh' | 'en'>('zh');
+  const [userEmail, setUserEmail] = useState<string>('');
 
   const current = captions[idx] ?? '';
+
+  // Touch swipe refs for mobile navigation
+  const touchStartXRef = useRef<number | null>(null);
+  const touchStartYRef = useRef<number | null>(null);
+  const touchStartTimeRef = useRef<number>(0);
+
+  function handleTouchStart(e: React.TouchEvent) {
+    const t = e.changedTouches[0];
+    touchStartXRef.current = t.clientX;
+    touchStartYRef.current = t.clientY;
+    touchStartTimeRef.current = Date.now();
+  }
+
+  function handleTouchEnd(e: React.TouchEvent) {
+    const t = e.changedTouches[0];
+    const startX = touchStartXRef.current ?? t.clientX;
+    const startY = touchStartYRef.current ?? t.clientY;
+    const dx = t.clientX - startX;
+    const dy = t.clientY - startY;
+    const dt = Date.now() - touchStartTimeRef.current;
+    // Only treat as horizontal swipe when horizontal movement dominates
+    const horizontal = Math.abs(dx) > Math.abs(dy);
+    const distanceOk = Math.abs(dx) > 40; // px threshold
+    const timeOk = dt < 800; // quick gesture
+    if (horizontal && distanceOk && timeOk && captions.length > 0) {
+      if (dx < 0) {
+        nextCaption();
+      } else {
+        prevCaption();
+      }
+    }
+    touchStartXRef.current = null;
+    touchStartYRef.current = null;
+  }
 
   // Remember last selections
   useEffect(() => {
@@ -36,6 +75,26 @@ export default function CaptionPage() {
     } catch {}
   }, [product, tone, platform]);
 
+  // Fetch current auth user email for menu display
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const { data: { user } } = await sb.auth.getUser();
+        if (alive && user?.email) setUserEmail(user.email);
+      } catch {}
+    })();
+    return () => { alive = false; };
+  }, [sb]);
+
+  async function handleSignOut() {
+    try {
+      await sb.auth.signOut();
+    } finally {
+      location.href = '/login';
+    }
+  }
+
   async function handleGenerate() {
     if (!product || !tone) return;
     setLoading(true);
@@ -52,7 +111,87 @@ export default function CaptionPage() {
 
       if (!res.ok) throw new Error('Bad response');
       const data = await res.json();
-      const result: string[] = Array.isArray(data?.captions) ? data.captions : [];
+      // Defensive normalization: always produce string[] even if backend returns a JSON string
+      function normalizeCaptions(input: unknown): string[] {
+        try {
+          if (Array.isArray(input)) {
+            if (input.length === 1 && typeof input[0] === 'string') {
+              // Sometimes the single item is a JSON string like {"captions":[...]}
+              try {
+                const maybe = JSON.parse(input[0]);
+                if (Array.isArray(maybe?.captions)) return normalizeCaptions(maybe.captions);
+                if (typeof maybe?.captions === 'string') {
+                  // captions is a single string, not array
+                  try {
+                    const inner = JSON.parse(maybe.captions);
+                    if (Array.isArray(inner)) return normalizeCaptions(inner);
+                  } catch {}
+                  return [String(maybe.captions).replace(/\\n/g, '\n').trim()].filter(Boolean);
+                }
+              } catch {}
+            }
+            const flat: string[] = [];
+            for (const el of input) {
+              if (typeof el === 'string') {
+                const raw = el.trim();
+                // If any item itself looks like JSON, try to unpack captions from it
+                if (raw.startsWith('{') || raw.startsWith('[') || raw.includes('"captions"')) {
+                  try {
+                    const parsed = JSON.parse(raw);
+                    if (Array.isArray(parsed?.captions)) {
+                      flat.push(...normalizeCaptions(parsed.captions));
+                      continue;
+                    }
+                    if (typeof parsed?.captions === 'string') {
+                      const innerStr = String(parsed.captions);
+                      try {
+                        const innerParsed = JSON.parse(innerStr);
+                        if (Array.isArray(innerParsed)) {
+                          flat.push(...normalizeCaptions(innerParsed));
+                          continue;
+                        }
+                      } catch {}
+                      flat.push(innerStr.replace(/\\n/g, '\n').trim());
+                      continue;
+                    }
+                    if (Array.isArray(parsed)) {
+                      flat.push(...normalizeCaptions(parsed));
+                      continue;
+                    }
+                  } catch {}
+                }
+                flat.push(raw.replace(/\\n/g, '\n'));
+              } else if (Array.isArray(el)) {
+                flat.push(...normalizeCaptions(el));
+              } else if (el && typeof el === 'object' && 'captions' in (el as any)) {
+                flat.push(...normalizeCaptions((el as any).captions));
+              } else if (el != null) {
+                flat.push(String(el));
+              }
+            }
+            return flat.filter(Boolean);
+          }
+          if (typeof input === 'string') {
+            try {
+              const parsed = JSON.parse(input);
+              if (Array.isArray(parsed?.captions)) return normalizeCaptions(parsed.captions);
+              if (typeof parsed?.captions === 'string') {
+                // handle object with captions as a string
+                try {
+                  const inner = JSON.parse(parsed.captions);
+                  if (Array.isArray(inner)) return normalizeCaptions(inner);
+                } catch {}
+                return [String(parsed.captions).replace(/\\n/g, '\n').trim()].filter(Boolean);
+              }
+            } catch {}
+            return [input.replace(/\\n/g, '\n').trim()].filter(Boolean);
+          }
+          return [];
+        } catch {
+          return [];
+        }
+      }
+      const result = normalizeCaptions((data as any)?.captions).slice(0, 3);
       setCaptions(result);
     } catch (e) {
       setHint('生成失败，请重试');
@@ -101,17 +240,33 @@ export default function CaptionPage() {
   const prevCaption = () => setIdx((idx - 1 + captions.length) % captions.length);
 
   return (
-    <div style={containerStyle} className="safe-area-bottom">
-      <div style={mainStyle}>
+    <>
+      {/* Floating Bubble Navigation */}
+      <div className="nav-rail safe-area-top">
+        <div className="nav-bubble">
+          <div style={{ flex: 1 }} />   {/* 左空 */}
+          <div style={{ flex: 1 }} />   {/* 中空（不要标题） */}
+          <button
+            className="nav-icon"
+            aria-label="Open menu"
+            onClick={() => setMenuOpen(true)}
+          >
+            <div className="nav-hamburger"><div /></div>
+          </button>
+        </div>
+      </div>
+
+      <div style={containerStyle} className="safe-area-bottom">
+        <div className="container-narrow" style={{...mainStyle, maxWidth: 'unset', marginTop: '16px'}}>
         {/* Header */}
-        <header style={headerStyle}>
-          <h1 style={titleStyle}>生成社媒文案</h1>
-          <p style={subtitleStyle}>选择产品、风格与平台，点击生成。</p>
+        <header className="header-center">
+          <h1 className="title">AI 自动文案生成系统</h1>
+          <p className="subtitle">选择产品、风格与平台，点击生成。</p>
         </header>
 
         {/* Input Card */}
         <motion.div
-          style={cardStyle}
+          className="card"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.26, ease: 'easeOut' }}
@@ -120,7 +275,8 @@ export default function CaptionPage() {
             <select
               value={product}
               onChange={(e) => setProduct(e.target.value)}
-              style={{ ...selectStyle, color: product ? 'var(--text)' : 'var(--text-muted)' }}
+              className="select"
+              style={{ color: product ? 'var(--text)' : 'var(--text-muted)' }}
             >
               <option value="" disabled>请选择产品</option>
               {PRODUCTS.map((p) => (
@@ -131,7 +287,8 @@ export default function CaptionPage() {
             <select
               value={tone}
               onChange={(e) => setTone(e.target.value)}
-              style={{ ...selectStyle, color: tone ? 'var(--text)' : 'var(--text-muted)' }}
+              className="select"
+              style={{ color: tone ? 'var(--text)' : 'var(--text-muted)' }}
             >
               <option value="" disabled>请选择风格</option>
               {STYLES.map((s) => (
@@ -142,7 +299,8 @@ export default function CaptionPage() {
             <select
               value={platform}
               onChange={(e) => setPlatform(e.target.value)}
-              style={{ ...selectStyle, color: platform ? 'var(--text)' : 'var(--text-muted)' }}
+              className="select"
+              style={{ color: platform ? 'var(--text)' : 'var(--text-muted)' }}
             >
               {PLATFORMS.map((p) => (
                 <option key={p} value={p}>{p}</option>
@@ -150,11 +308,7 @@ export default function CaptionPage() {
             </select>
 
             <motion.button
-              style={{
-                ...buttonStyle,
-                opacity: !product || !tone || loading ? 0.6 : 1,
-                cursor: !product || !tone || loading ? 'not-allowed' : 'pointer',
-              }}
+              className="btn-premium"
               whileTap={{ scale: 0.98 }}
               whileHover={{ y: loading ? 0 : -2 }}
               onClick={handleGenerate}
@@ -213,8 +367,8 @@ export default function CaptionPage() {
                   {captions.map((_, i) => (
                     <motion.div
                       key={i}
+                      className="dot"
                       style={{
-                        ...dotStyle,
                         backgroundColor: i === idx ? 'var(--primary)' : '#D1D5DB',
                       }}
                       whileTap={{ scale: 0.8 }}
@@ -238,11 +392,13 @@ export default function CaptionPage() {
                 <AnimatePresence mode="wait">
                   <motion.div
                     key={idx}
-                    style={captionTextStyle}
+                    className="caption-bubble"
                     initial={{ opacity: 0, x: 16 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: -16 }}
                     transition={{ duration: 0.18 }}
+                    onTouchStart={handleTouchStart}
+                    onTouchEnd={handleTouchEnd}
                   >
                     {current}
                   </motion.div>
@@ -252,7 +408,7 @@ export default function CaptionPage() {
               {/* Action Buttons */}
               <div style={actionButtonsStyle}>
                 <motion.button
-                  style={copyButtonStyle}
+                  className="btn-secondary"
                   whileTap={{ scale: 0.98 }}
                   whileHover={{ scale: 1.02 }}
                   onClick={() => handleCopy(current)}
@@ -261,7 +417,7 @@ export default function CaptionPage() {
                 </motion.button>
                 
                 <motion.button
-                  style={shareButtonStyle}
+                  className="btn-dark"
                   whileTap={{ scale: 0.98 }}
                   whileHover={{ scale: 1.02 }}
                   onClick={() => handleShare(current)}
@@ -291,7 +447,51 @@ export default function CaptionPage() {
           )}
         </AnimatePresence>
       </div>
-    </div>
+
+      {/* Right Slide Menu */}
+      <AnimatePresence>
+        {menuOpen && (
+          <>
+            {/* Background overlay */}
+            <motion.div
+              className="menu-overlay"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setMenuOpen(false)}
+            />
+            {/* Drawer panel */}
+            <motion.aside
+              className="menu-panel"
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'tween', duration: 0.22 }}
+            >
+              <div className="menu-header">
+                <div className="menu-title">菜单</div>
+                <button className="icon-btn" onClick={() => setMenuOpen(false)}>✕</button>
+              </div>
+              <div className="menu-content">
+                <div className="menu-item disabled">{userEmail || '未登录'}</div>
+
+                <label style={{ padding: '6px 10px', color:'#9ca3af', fontSize:12 }}>语言 Language</label>
+                <select
+                  className="menu-select"
+                  value={lang}
+                  onChange={(e)=>setLang(e.target.value as 'zh'|'en')}
+                >
+                  <option value="zh">🇨🇳 中文</option>
+                  <option value="en">🇬🇧 English</option>
+                </select>
+                <button className="menu-item" onClick={handleSignOut}>退出登录</button>
+              </div>
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
+      </div>
+    </>
   );
 }
 
@@ -310,6 +510,7 @@ const mainStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: '24px',
+  marginTop: '12px',
 };
 
 const headerStyle: React.CSSProperties = {
