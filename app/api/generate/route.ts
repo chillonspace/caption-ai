@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
@@ -220,7 +221,16 @@ FleXa:
 
     const finalCaptions = captions.length > 0 ? finalizeNormalize(captions) : finalizeNormalize(text);
 
-    return NextResponse.json({ captions: finalCaptions });
+    return new NextResponse(
+      JSON.stringify({ captions: finalCaptions }),
+      {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store, max-age=0',
+        },
+      }
+    );
   } catch (err: unknown) {
     return NextResponse.json(
       { error: 'Request failed', detail: (err as Error)?.message ?? String(err) },
