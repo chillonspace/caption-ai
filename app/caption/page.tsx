@@ -22,6 +22,24 @@ export default function CaptionPage() {
   const [userEmail, setUserEmail] = useState<string>('');
 
   const current = captions[idx] ?? '';
+  // Final display fallback: if current is a JSON string like {"captions":[...]},
+  // extract the proper item and normalize newlines
+  const display = (() => {
+    const raw = String(current ?? '');
+    try {
+      const parsed = JSON.parse(raw);
+      const list = Array.isArray(parsed?.captions)
+        ? parsed.captions
+        : Array.isArray(parsed)
+        ? parsed
+        : null;
+      if (Array.isArray(list) && list.length > 0) {
+        const i = ((idx % list.length) + list.length) % list.length;
+        return String(list[i] ?? '').replace(/\\n/g, '\n').trim();
+      }
+    } catch {}
+    return raw.replace(/\\n/g, '\n');
+  })();
 
   // Touch swipe refs for mobile navigation
   const touchStartXRef = useRef<number | null>(null);
@@ -400,7 +418,7 @@ export default function CaptionPage() {
                     onTouchStart={handleTouchStart}
                     onTouchEnd={handleTouchEnd}
                   >
-                    {current}
+                    {display}
                   </motion.div>
                 </AnimatePresence>
               </div>
@@ -411,7 +429,7 @@ export default function CaptionPage() {
                   className="btn-secondary"
                   whileTap={{ scale: 0.98 }}
                   whileHover={{ scale: 1.02 }}
-                  onClick={() => handleCopy(current)}
+                  onClick={() => handleCopy(display)}
                 >
                   复制
                 </motion.button>
@@ -420,7 +438,7 @@ export default function CaptionPage() {
                   className="btn-dark"
                   whileTap={{ scale: 0.98 }}
                   whileHover={{ scale: 1.02 }}
-                  onClick={() => handleShare(current)}
+                  onClick={() => handleShare(display)}
                 >
                   分享
                 </motion.button>
