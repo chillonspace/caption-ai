@@ -20,7 +20,7 @@
 }
 
 body {
-  background: var(--background);
+  background: var(--bg-page);  /* 强制使用浅色页面背景，不跟随系统dark mode */
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
@@ -50,5 +50,182 @@ body {
 
 /* Safe area bottom padding for iOS */
 .safe-area-bottom{padding-bottom:env(safe-area-inset-bottom);}
+/* Brand tokens */
+:root{
+  --brand:#1B7F5D;               /* health green */
+  --brand-foreground:#0C3B2B;
+  --gold-start:#F5D16B;          /* premium gold */
+  --gold-end:#D8A72C;
+
+  /* replace primary from FB blue to brand green */
+  --primary: var(--brand);
+  --primary-hover: #14664B;
+}
+
+/* Premium button with gradient border & hover gradient fill */
+.btn-premium{
+  position: relative;
+  height: 56px;
+  padding: 0 18px;
+  font-size: 15px;
+  font-weight: 700;
+  border-radius: 14px;
+  color: #fff;
+  background:
+    linear-gradient(var(--primary), var(--primary)) padding-box,
+    linear-gradient(90deg, var(--gold-start), var(--gold-end)) border-box;
+  border: 1px solid transparent;
+  transition: transform .15s ease, box-shadow .2s ease, background .2s ease;
+  box-shadow: 0 6px 18px rgba(12,59,43,.12);
+}
+.btn-premium:hover:not(:disabled){
+  background:
+    linear-gradient(90deg, var(--brand) 30%, var(--gold-start) 100%) padding-box,
+    linear-gradient(90deg, var(--gold-start), var(--gold-end)) border-box;
+  transform: translateY(-2px);
+}
+.btn-premium:active:not(:disabled){ transform: translateY(0); }
+.btn-premium:disabled{ opacity:.6; cursor:not-allowed; }
+
+/* Card + selects polish (reusable without Tailwind) */
+.card{
+  background-color: var(--bg-card);
+  border-radius: 18px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-soft);
+}
+.select{
+  height: 52px;
+  font-size: 16px;
+  padding: 0 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background-color: var(--bg-card);
+  color: var(--text-muted);
+  outline: none;
+  transition: border-color .2s, box-shadow .2s, color .2s;
+}
+.select:focus{
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(27,127,93,.18);
+  color: var(--text);
+}
+.caption-bubble{
+  font-size: clamp(15px, 3.8vw, 16px);
+  line-height: 1.6;
+  color: var(--text);
+  background-color: var(--bg-soft);
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  white-space: pre-wrap; /* 保留换行与空行，适配Facebook长帖格式 */
+}
+
+/* Nav dot */
+.dot{ width:6px; height:6px; border-radius:50%; transition: background-color .2s; }
+
+/* Container widths */
+.container-narrow{ width:100%; max-width:720px; margin:0 auto; }
+.header-center{ text-align:center; margin-bottom:8px; }
+.title{ font-size: clamp(22px, 5vw, 28px); font-weight:800; color:var(--text); margin:0 0 8px 0; letter-spacing:-.02em; }
+.subtitle{ font-size: clamp(13px, 3.6vw, 15px); color:var(--text-muted); margin:0; }
+
+/* Buttons secondary */
+.btn-secondary, .btn-dark{
+  height:48px; font-size:15px; font-weight:600; border-radius:12px; transition:all .2s;
+}
+.btn-secondary{ background:#fff; color:var(--text); border:1px solid #CBD5E1; }
+.btn-secondary:hover{ transform: translateY(-1px); }
+.btn-dark{ background:#111827; color:#fff; border:none; }
+.btn-dark:hover{ transform: translateY(-1px); }
+
+/* Legacy topbar styles - remove if not used elsewhere */
+.topbar{ display: none !important; }
+
+/* 强制确保顶部区域没有黑色背景 */
+html, body, #__next, [data-nextjs-scroll-focus-boundary] {
+  background: var(--bg-page) !important;
+}
+
+/* nav 容器背景设为透明，防止黑带 */
+.nav-rail{ 
+  background: transparent !important; 
+  background-color: transparent !important;
+}
+
+.menu-overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:60;
+}
+.menu-panel{
+  position:fixed;top:0;bottom:0;right:0;width:min(80vw,280px);
+  background:#111827;color:#fff;z-index:61;
+  display:flex;flex-direction:column;
+}
+.menu-header{height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid rgba(255,255,255,.1);}
+.menu-title{font-weight:700;}
+.menu-content{padding:12px;display:flex;flex-direction:column;gap:12px;}
+.menu-item{height:44px;display:flex;align-items:center;padding:0 12px;border-radius:10px;}
+.menu-item.disabled{opacity:.5;cursor:default;}
+.menu-select{height:44px;border-radius:10px;border:1px solid rgba(255,255,255,.2);background:#0f172a;color:#fff;padding:0 10px;}
+
+/* Floating bubble navigation */
+.nav-rail{
+  position: sticky; top: 8px; z-index: 60;
+  display: flex; justify-content: center;
+  padding: 0 12px;
+}
+.nav-bubble{
+  /* 关键：不随内容收缩 */
+  inline-size: min(720px, 100%);   /* 等价于"宽度=不超过720px，最多占满父级" */
+  block-size: 40px;
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 12px;
+  border-radius: 999px;
+
+  /* 浅色泡泡外观（对齐你现在风格） */
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 24px rgba(2,6,23,.08), inset 0 1px 0 rgba(255,255,255,.6);
+  color: var(--text);
+}
+.nav-title{
+  flex: 1; text-align: center;
+  font-weight: 700; font-size: 13px; letter-spacing:.2px; 
+  color: var(--text);
+}
+/* 右侧汉堡按钮造型 */
+.nav-icon{
+  inline-size: 28px; block-size: 28px; border-radius: 8px;
+  display: grid; place-items: center;
+  background: #fff; border: 1px solid var(--border); color: #111827;
+  cursor: pointer;
+}
+.nav-hamburger{ inline-size: 16px; block-size: 10px; position: relative; }
+.nav-hamburger::before,.nav-hamburger::after,.nav-hamburger div{
+  content:""; position:absolute; inset-inline:0; block-size:2px;
+  background: currentColor; opacity: .95;
+}
+.nav-hamburger div{ top:50%; transform: translateY(-50%); }
+.nav-hamburger::before{ top:0; } .nav-hamburger::after{ bottom:0; }
+
 /* Safe area top padding for iOS */
 .safe-area-top{padding-top:env(safe-area-inset-top);} 
+
+/* ===== Login page styles (minimal, brand-aligned) ===== */
+.login-main{ min-height:100dvh; display:grid; place-items:start center; background:var(--bg-page); padding:24px 16px; padding-top:12vh; }
+.card-login{ width:100%; max-width:420px; background:var(--bg-card); border:1px solid var(--border); border-radius:16px; padding:28px 20px; box-shadow:0 8px 30px rgba(0,0,0,.06); }
+.title-login{ text-align:center; color:var(--text); font-weight:700; font-size:20px; margin:0 0 20px; }
+.title-underline{ width:48px; height:2px; background:linear-gradient(90deg,var(--gold-start),var(--gold-end)); border-radius:999px; margin:0 auto 8px; }
+.form-login{ display:grid; gap:16px; }
+.label-login{ font-size:14px; color:#374151; }
+.input-login{ height:48px; border:1px solid var(--border); border-radius:10px; padding:0 12px; background:#fff; color:var(--text); outline:none; font-size:16px; }
+.input-login::placeholder{ color:#9CA3AF; font-size:16px; }
+.input-login:focus{ border-color:var(--brand); box-shadow:0 0 0 2px rgba(27,127,93,.14); }
+.password-row{ position:relative; }
+.pw-toggle{ position:absolute; right:8px; top:50%; transform:translateY(-50%); background:transparent; border:none; color:#6B7280; font-size:12px; cursor:pointer; padding:4px 6px; }
+.btn-login{ height:48px; border-radius:12px; font-weight:700; background:var(--brand); color:#fff; border:1px solid var(--brand); transition:transform .15s ease, background .2s ease; font-size:16px; }
+.btn-login:hover:not(:disabled){ background:var(--primary-hover); transform:translateY(-1px); }
+.btn-login:active:not(:disabled){ transform:translateY(1px); }
+.btn-login:disabled{ opacity:.6; cursor:not-allowed; }
+.error-login{ color:#B91C1C; font-size:12px; margin-top:8px; }

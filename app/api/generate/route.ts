@@ -13,8 +13,10 @@ export async function POST(req: NextRequest) {
     }
 
     const payload = {
-      model: 'gpt-5-mini',
+      model: 'gpt-4o-mini',
       temperature: 1,
+      top_p: 0.9,
+      frequency_penalty: 0.3,
       messages: [
         {
           role: 'system',
@@ -30,11 +32,22 @@ export async function POST(req: NextRequest) {
 - 输出严格 JSON: {"captions":["文案1","文案2","文案3"]}。若不符合请自我修正后再返回。
 - 只返回原始 JSON，不要其他解释、不要加代码块标记。
 
+【生成篇幅】
+- 每条必须为 Facebook 长帖，长度 120–200 字。
+- 包含 4–8 个自然段，每段 1–2 句话。
+
+【视觉排版】
+- 使用短句 + 分行，每 1–2 句换行。
+- 段落之间必须留一行空白。
+- 产品利益点要用符号列点（✅ / — / •）。
+- 文末必须附上 1–3 个简短 hashtag（例如 #轻松呼吸 #日常保养 #天然草本）。
+
 【写作框架（每条使用 PAS）】
-1) Problem：一句口语化痛点钩子，引发共鸣。
-2) Agitate：轻微放大困扰，让读者感觉“必须解决”。
-3) Solution：引出产品 + 简洁卖点。
-4) Action：明确 CTA，单独成行，强提醒。
+1) Problem：生活化痛点故事开头，引发共鸣。
+2) Agitate：放大困扰，强调不解决的影响。
+3) Solution：引出产品与体验变化 + 简洁卖点；中后段用符号列点展示产品利益点。
+4) Action：结尾给出信任背书（如 KKM 认证）+ 明确 CTA（留言、私讯、想试试）。
+5) 收尾：附上 1–3 个简短 hashtag。
 
 写作风格：有说服力、简洁、要点式、可执行。
 
@@ -85,12 +98,14 @@ FleXa:
         },
         {
           role: 'user',
-          content: `产品: ${product}\n口吻: ${tone}\n平台: ${platform ?? 'Facebook'}\n\n请结合该产品的资料，生成三条不同角度的短文案，满足所有写作要求。`,
+          content: `产品: ${product}\n口吻: ${tone}\n平台: ${platform ?? 'Facebook'}\n\n请严格按「生成篇幅」「视觉排版」「写作框架（PAS）」「输出格式」生成三条不同角度的 Facebook 长帖文案，并满足所有写作要求。`,
         },
       ],
     } as const;
 
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    // First try with the configured model; if it's unavailable (e.g. model_not_found),
+    // fall back to a widely-available model to avoid hard failures in dev.
+    let res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -100,11 +115,29 @@ FleXa:
     });
 
     if (!res.ok) {
-      const errorText = await res.text();
-      return NextResponse.json(
-        { error: 'Upstream OpenAI error', detail: errorText },
-        { status: 502 }
-      );
+      const primaryErrorText = await res.text();
+      // Retry once with a stable fallback model
+      const fallbackPayload = { ...payload, model: 'gpt-4o-mini' } as const;
+      const retry = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(fallbackPayload),
+      });
+      if (!retry.ok) {
+        const fallbackErrorText = await retry.text();
+        return NextResponse.json(
+          {
+            error: 'Upstream OpenAI error',
+            detail: primaryErrorText || fallbackErrorText,
+            tried: [payload.model, fallbackPayload.model],
+          },
+          { status: 502 }
+        );
+      }
+      res = retry;
     }
 
     const data = await res.json();
@@ -146,15 +179,48 @@ FleXa:
       }
     }
 
-    if (captions.length === 0) {
-      captions = text
-        .split(/\n{2,}|^\d+[).]\s|^[-•]\s/m)
-        .map((t: string) => t.trim())
-        .filter(Boolean)
-        .slice(0, 3);
+    // Final normalization: always return clean string[] with real newlines
+    function finalizeNormalize(input: unknown): string[] {
+      try {
+        if (Array.isArray(input)) {
+          const flat: string[] = [];
+          for (const el of input) {
+            if (typeof el === 'string') {
+              const raw = el.trim();
+              if (raw.startsWith('{') || raw.startsWith('[') || raw.includes('"captions"')) {
+                try {
+                  const parsed = JSON.parse(raw);
+                  flat.push(...finalizeNormalize((parsed as any)?.captions ?? parsed));
+                  continue;
+                } catch {}
+              }
+              flat.push(raw.replace(/\\n/g, '\n'));
+            } else if (Array.isArray(el)) {
+              flat.push(...finalizeNormalize(el));
+            } else if (el && typeof el === 'object' && 'captions' in (el as any)) {
+              flat.push(...finalizeNormalize((el as any).captions));
+            } else if (el != null) {
+              flat.push(String(el));
+            }
+          }
+          return flat.filter(Boolean).slice(0, 3);
+        }
+        if (typeof input === 'string') {
+          try {
+            const parsed = JSON.parse(input);
+            return finalizeNormalize((parsed as any)?.captions ?? parsed);
+          } catch {}
+          return [input.replace(/\\n/g, '\n').trim()].filter(Boolean).slice(0, 3);
+        }
+        return [];
+      } catch {
+        return [];
+      }
     }
 
-    return NextResponse.json({ captions });
+    const finalCaptions = captions.length > 0 ? finalizeNormalize(captions) : finalizeNormalize(text);
+
+    return NextResponse.json({ captions: finalCaptions });
   } catch (err: unknown) {
     return NextResponse.json(
       { error: 'Request failed', detail: (err as Error)?.message ?? String(err) },
