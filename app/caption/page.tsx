@@ -370,40 +370,40 @@ export default function CaptionPage() {
               exit={{ opacity: 0, y: -30 }}
               transition={{ duration: 0.22 }}
             >
-              {/* Navigation */}
-              <div style={navStyle}>
-                <motion.button
-                  style={navButtonStyle}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={prevCaption}
-                  disabled={captions.length <= 1}
-                >
-                  ←
-                </motion.button>
-                
-                <div style={dotsStyle}>
-                  {captions.map((_, i) => (
-                    <motion.div
-                      key={i}
-                      className="dot"
-                      style={{
-                        backgroundColor: i === idx ? 'var(--primary)' : '#D1D5DB',
-                      }}
-                      whileTap={{ scale: 0.8 }}
-                      onClick={() => setIdx(i)}
-                    />
-                  ))}
-                </div>
+              {/* Navigation (only when multiple captions) */}
+              {captions.length > 1 && (
+                <div style={navStyle}>
+                  <motion.button
+                    style={navButtonStyle}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={prevCaption}
+                  >
+                    ←
+                  </motion.button>
+                  
+                  <div style={dotsStyle}>
+                    {captions.map((_, i) => (
+                      <motion.div
+                        key={i}
+                        className="dot"
+                        style={{
+                          backgroundColor: i === idx ? 'var(--primary)' : '#D1D5DB',
+                        }}
+                        whileTap={{ scale: 0.8 }}
+                        onClick={() => setIdx(i)}
+                      />
+                    ))}
+                  </div>
 
-                <motion.button
-                  style={navButtonStyle}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={nextCaption}
-                  disabled={captions.length <= 1}
-                >
-                  →
-                </motion.button>
-              </div>
+                  <motion.button
+                    style={navButtonStyle}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={nextCaption}
+                  >
+                    →
+                  </motion.button>
+                </div>
+              )}
 
               {/* Caption Display */}
               <div style={captionContainerStyle}>
@@ -415,8 +415,8 @@ export default function CaptionPage() {
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: -16 }}
                     transition={{ duration: 0.18 }}
-                    onTouchStart={handleTouchStart}
-                    onTouchEnd={handleTouchEnd}
+                    onTouchStart={captions.length > 1 ? handleTouchStart : undefined}
+                    onTouchEnd={captions.length > 1 ? handleTouchEnd : undefined}
                   >
                     {display}
                   </motion.div>

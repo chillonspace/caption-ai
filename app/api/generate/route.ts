@@ -1,144 +1,133 @@
 import { NextRequest, NextResponse } from 'next/server';
+import kbJson from '@/lib/kb/10secherbs_kb.json';
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
     const { product, tone, platform } = await req.json();
 
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json({ error: 'Missing OPENAI_API_KEY' }, { status: 500 });
+    // --- Minimal KB wiring & platform profiles (inline; no new files) ---
+    const KB: any = kbJson as any;
+    const PLATFORM_PROFILES = {
+      facebook: { length_hint: 'medium', emoji_range: [2, 4], hashtag_range: [2, 5], cta: 'pm_me', tone: 'light' },
+      xiaohongshu: { length_hint: 'long', emoji_range: [2, 5], hashtag_range: [6, 10], cta: 'comment', tone: 'warm' },
+      instagram: { length_hint: 'short', emoji_range: [1, 3], hashtag_range: [4, 8], cta: 'link', tone: 'playful' },
+      tiktok: { length_hint: 'short', emoji_range: [1, 3], hashtag_range: [3, 6], cta: 'comment', tone: 'playful' },
+    } as const;
+    type PlatformKey = keyof typeof PLATFORM_PROFILES;
+
+    function normalizeProductKey(keyRaw: string): string {
+      const k = (keyRaw || '').toLowerCase();
+      if (k.includes('trio') && k.includes('care')) return 'TrioCare';
+      if (k.includes('flo')) return 'FloMix';
+      if (k.includes('flex')) return 'FleXa';
+      if (k.includes('air')) return 'AirVo';
+      if (k.includes('tri') && k.includes('guard')) return 'TriGuard';
+      const exact = ['TriGuard', 'FloMix', 'FleXa', 'AirVo', 'TrioCare'];
+      return exact.find(x => x.toLowerCase() === k) || 'TriGuard';
+    }
+
+    function pickN<T>(arr: T[] | undefined, n: number): T[] {
+      if (!arr || arr.length === 0 || n <= 0) return [];
+      const copy = arr.slice();
+      for (let i = copy.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy.slice(0, Math.min(n, copy.length));
+    }
+    function maybePickN<T>(arr: T[] | undefined, n: number, p = 0.6): T[] {
+      return Math.random() < p ? pickN(arr, n) : [];
+    }
+    function pickFacts(productKey: string, variationLevel = 2) {
+      const p = KB[productKey] as any;
+      if (!p) return { 功效: [], 技术: [], 体验: [], 适用人群: [], 使用方式: [], 注意事项: [] };
+      const res = {
+        体验: pickN(p.体验, 1),
+        功效: pickN(p.功效, 1 + (variationLevel > 1 ? 1 : 0)),
+        技术: pickN(p.技术, variationLevel > 2 ? 2 : 1),
+        适用人群: maybePickN(p.适用人群, 1, 0.5),
+        使用方式: maybePickN(p.使用方式, 1, 0.5),
+        注意事项: maybePickN(p.注意事项, 1, 0.3),
+      } as Record<string, string[]>;
+      const buckets: Array<[string, string[]]> = Object.entries(res) as any;
+      const flat = buckets.flatMap(([k, arr]) => (arr || []).map(v => ({ k, v })));
+      const desired = 2 + Math.floor(Math.random() * 3); // 2~4
+      if (flat.length > desired) {
+        const prio: Record<string, number> = { 体验: 3, 功效: 3, 技术: 2, 适用人群: 1, 使用方式: 1, 注意事项: 1 };
+        flat.sort((a, b) => (prio[b.k] || 0) - (prio[a.k] || 0));
+        const kept = flat.slice(0, desired);
+        const newRes: Record<string, string[]> = { 体验: [], 功效: [], 技术: [], 适用人群: [], 使用方式: [], 注意事项: [] };
+        kept.forEach(({ k, v }) => newRes[k].push(v));
+        return newRes;
+      }
+      return res;
+    }
+
+    if (!process.env.DEEPSEEK_API_KEY) {
+      return NextResponse.json({ error: 'Missing DEEPSEEK_API_KEY' }, { status: 500 });
     }
 
     if (!product || !tone) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
+    const plat: PlatformKey = (Object.keys(PLATFORM_PROFILES) as string[]).includes((platform || '').toLowerCase())
+      ? ((platform || '').toLowerCase() as PlatformKey)
+      : 'facebook';
+    const productKey = normalizeProductKey(product || 'TriGuard');
+    const facts = pickFacts(productKey, 2);
+
+    const SYSTEM_PROMPT = [
+      'You are a Malaysian agent writing social posts to friends, not a brand account.',
+      'Write like a real person: colloquial, short sentences, light code-mixing OK (zh/EN/BM) with Malaysian tone.',
+      'Avoid AI tone and ad clichés. Keep it scannable (short lines, blank lines, one idea per sentence).',
+      'Use exactly the facts provided in <KB>; do not invent ingredients, medical claims, or guarantees.',
+      'If numbers/certifications appear in <KB> (e.g., KKM), keep them factual and low‑key.',
+      'No diagnoses/cures; this is daily‑care copy, not medical advice.'
+    ].join('\n');
+
+    const platformProfileBlock = JSON.stringify({
+      platform: plat,
+      ...PLATFORM_PROFILES[plat],
+      tone: 'light',
+      variation_level: 2,
+    }, null, 2);
+    const kbBlock = JSON.stringify({ product_key: productKey, facts }, null, 2);
+    const OUTPUT_RULES = [
+      '开头：用“场景/痛点/细节”吸睛；避免千篇一律的“你是否…/有没有…”。',
+      '中段：自然带入产品名；只选 <KB.facts> 中 2–4 点（体验/功效/技术混搭），不要全塞。',
+      '结尾CTA：FB=私讯我；小红书=评论/收藏；IG=点链接；TikTok=评论/私信。',
+      '字数：short≈60–100 / medium≈120–180 / long≈200–280（按平台配置）。',
+      'Emoji：数量按范围；不要一行堆一排。',
+      'Hashtags：数量按范围，混合“产品名+功效/场景”。',
+      '输出：只给最终文案，不要解释过程。'
+    ].join('\n');
+
+    const userPrompt = ['<PLATFORM_PROFILE>', platformProfileBlock, '', '<KB>', kbBlock, '', '<OUTPUT_RULES>', OUTPUT_RULES].join('\n');
+
     const payload = {
-      model: 'gpt-4o-mini',
-      temperature: 1,
-      top_p: 0.9,
-      frequency_penalty: 0.3,
+      model: (process.env.GEN_MODEL as string) || 'deepseek-chat',
+      temperature: 0.9,
+      top_p: 0.95,
+      frequency_penalty: 0.2,
       messages: [
-        {
-          role: 'system',
-          content: `
-你是资深中文社媒文案助手，目标读者是马来西亚 30–55 岁用户。
-
-【写作要求】
-- 中文为主，可少量 EN/BM（≤15%）。
-- 每条 ≤1 emoji。
-- 必须包含明确 CTA（如：私讯我、留言“我要”、点击链接）。
-- 句式短，分段清晰，排版类似广告海报：痛点 → 利益 → CTA。
-- 避免夸大疗效或医疗承诺（禁止“治愈、永久、保证、奇迹”等字眼）。
-- 输出严格 JSON: {"captions":["文案1","文案2","文案3"]}。若不符合请自我修正后再返回。
-- 只返回原始 JSON，不要其他解释、不要加代码块标记。
-
-【生成篇幅】
-- 每条必须为 Facebook 长帖，长度 120–200 字。
-- 包含 4–8 个自然段，每段 1–2 句话。
-
-【视觉排版】
-- 使用短句 + 分行，每 1–2 句换行。
-- 段落之间必须留一行空白。
-- 产品利益点要用符号列点（✅ / — / •）。
-- 文末必须附上 1–3 个简短 hashtag（例如 #轻松呼吸 #日常保养 #天然草本）。
-
-【写作框架（每条使用 PAS）】
-1) Problem：生活化痛点故事开头，引发共鸣。
-2) Agitate：放大困扰，强调不解决的影响。
-3) Solution：引出产品与体验变化 + 简洁卖点；中后段用符号列点展示产品利益点。
-4) Action：结尾给出信任背书（如 KKM 认证）+ 明确 CTA（留言、私讯、想试试）。
-5) 收尾：附上 1–3 个简短 hashtag。
-
-写作风格：有说服力、简洁、要点式、可执行。
-
-【平台指南】
-- Facebook：1–6 段短句，少标签；留白排版，利于快读。
-- 小红书：句子更短，可带 1–3 个标签，语气更轻松。
-
-【口吻切换】
-- 朋友介绍口吻：像分享个人体验，真实轻松，温和推荐。
-- 推销口吻：列点清晰写好处，更直接，行动号召更强。
-
-【角度要求】
-A：痛点共鸣 + 立即缓解感
-B：日常使用场景 + 适用人群
-C：利益清单（bullet points）+ 强 CTA
-
-【产品资料（参考）】
-AirVo:
-- 痛点: 鼻塞、鼻痒、打喷嚏、夜里睡不好、胸口闷
-- 利益: 舒缓鼻塞、呼吸顺畅、改善睡眠、减轻流涕
-- 卖点: 草本成分、10秒透皮吸收、小分子渗透、不经肠胃
-- 信任: KKM认证、3岁以上可用
-
-TriGuard:
-- 痛点: 饭后疲惫、血糖/血脂困扰
-- 利益: 调节血糖血脂、抑制食欲、支持肝脾肾
-- 卖点: 草本精华、小分子快速吸收
-- 信任: KKM认证、不伤肝
-
-TrioCare:
-- 痛点: 肝脏负担重、消化不良、疲劳
-- 利益: 护肝解毒、润肠排毒、增强代谢
-- 卖点: 草本小分子、透皮吸收
-- 信任: KKM认证、天然草本
-
-FloMix:
-- 痛点: 消化不良、腹胀、排便不畅
-- 利益: 健胃消食、缓解不适、润肠排毒
-- 卖点: 草本精华透皮吸收、减轻肠胃负担
-- 信任: KKM认证、安全温和
-
-FleXa:
-- 痛点: 关节酸痛、炎症困扰、身体僵硬
-- 利益: 活血化瘀、缓解炎症、镇定舒缓
-- 卖点: 天然草本、小分子快速渗透
-- 信任: KKM认证、不经肠胃
-          `,
-        },
-        {
-          role: 'user',
-          content: `产品: ${product}\n口吻: ${tone}\n平台: ${platform ?? 'Facebook'}\n\n请严格按「生成篇幅」「视觉排版」「写作框架（PAS）」「输出格式」生成三条不同角度的 Facebook 长帖文案，并满足所有写作要求。`,
-        },
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt },
       ],
     } as const;
 
-    // First try with the configured model; if it's unavailable (e.g. model_not_found),
-    // fall back to a widely-available model to avoid hard failures in dev.
-    let res = await fetch('https://api.openai.com/v1/chat/completions', {
+    const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),
     });
-
     if (!res.ok) {
-      const primaryErrorText = await res.text();
-      // Retry once with a stable fallback model
-      const fallbackPayload = { ...payload, model: 'gpt-4o-mini' } as const;
-      const retry = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(fallbackPayload),
-      });
-      if (!retry.ok) {
-        const fallbackErrorText = await retry.text();
-        return NextResponse.json(
-          {
-            error: 'Upstream OpenAI error',
-            detail: primaryErrorText || fallbackErrorText,
-            tried: [payload.model, fallbackPayload.model],
-          },
-          { status: 502 }
-        );
-      }
-      res = retry;
+      const errorText = await res.text();
+      return NextResponse.json({ error: 'Upstream model error', detail: errorText }, { status: 502 });
     }
 
     const data = await res.json();
@@ -159,7 +148,7 @@ FleXa:
         captions = parsed.captions
           .map((t: unknown) => String(t ?? '').trim())
           .filter(Boolean)
-          .slice(0, 3);
+          .slice(0, 1);
       }
     } catch {
       try {
@@ -173,7 +162,7 @@ FleXa:
           captions = reparsed.captions
             .map((t: unknown) => String(t ?? '').trim())
             .filter(Boolean)
-            .slice(0, 3);
+            .slice(0, 1);
         }
       } catch {
         // fall through
@@ -204,14 +193,14 @@ FleXa:
               flat.push(String(el));
             }
           }
-          return flat.filter(Boolean).slice(0, 3);
+          return flat.filter(Boolean).slice(0, 1);
         }
         if (typeof input === 'string') {
           try {
             const parsed = JSON.parse(input);
             return finalizeNormalize((parsed as any)?.captions ?? parsed);
           } catch {}
-          return [input.replace(/\\n/g, '\n').trim()].filter(Boolean).slice(0, 3);
+          return [input.replace(/\\n/g, '\n').trim()].filter(Boolean).slice(0, 1);
         }
         return [];
       } catch {
