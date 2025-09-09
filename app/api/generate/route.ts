@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
     // --- Minimal KB wiring & platform profiles (inline; no new files) ---
     const KB: any = kbJson as any;
     const PLATFORM_PROFILES = {
-      facebook: { length_hint: 'medium', emoji_range: [2, 4], hashtag_range: [2, 5], cta: 'pm_me', tone: 'light' },
+      facebook: { length_hint: 'medium', emoji_range: [4, 8], hashtag_range: [5, 9], cta: 'pm_me', tone: 'light' },
       xiaohongshu: { length_hint: 'long', emoji_range: [2, 5], hashtag_range: [6, 10], cta: 'comment', tone: 'warm' },
       instagram: { length_hint: 'short', emoji_range: [1, 3], hashtag_range: [4, 8], cta: 'link', tone: 'playful' },
       tiktok: { length_hint: 'short', emoji_range: [1, 3], hashtag_range: [3, 6], cta: 'comment', tone: 'playful' },
@@ -42,13 +42,14 @@ export async function POST(req: NextRequest) {
     function pickFacts(productKey: string, variationLevel = 2) {
       const p = KB[productKey] as any;
       if (!p) return { 功效: [], 技术: [], 体验: [], 适用人群: [], 使用方式: [], 注意事项: [] };
+      // 体验/功效优先；技术点降权，其余为点缀
       const res = {
         体验: pickN(p.体验, 1),
         功效: pickN(p.功效, 1 + (variationLevel > 1 ? 1 : 0)),
-        技术: pickN(p.技术, variationLevel > 2 ? 2 : 1),
-        适用人群: maybePickN(p.适用人群, 1, 0.5),
+        技术: maybePickN(p.技术, 1, 0.4),
+        适用人群: maybePickN(p.适用人群, 1, 0.6),
         使用方式: maybePickN(p.使用方式, 1, 0.5),
-        注意事项: maybePickN(p.注意事项, 1, 0.3),
+        注意事项: maybePickN(p.注意事项, 1, 0.2),
       } as Record<string, string[]>;
       const buckets: Array<[string, string[]]> = Object.entries(res) as any;
       const flat = buckets.flatMap(([k, arr]) => (arr || []).map(v => ({ k, v })));
@@ -78,15 +79,87 @@ export async function POST(req: NextRequest) {
     const productKey = normalizeProductKey(product || 'TriGuard');
     const facts = pickFacts(productKey, 2);
 
-    const SYSTEM_PROMPT = [
-      '你是马来西亚本地风格的中文社媒文案写手（不是品牌官号），写给朋友看的口吻。',
-      '严格中文为主，可极少量 EN/BM 词语点缀（≤5%）；若非必要，请全中文。避免“AI腔”和硬广套话。',
-      '写短句、留空行、每句只表达一个想法；可用符号增强可读性（✅ ✨ —）。',
-      '只使用 <KB> 提供的事实，不要发明成分/功效/数据；技术点低调表达（如：小分子/道尔顿、10秒透皮、KKM）。',
-      '禁止使用模板化开头：例如 “最近/这阵子/有时候/常常/每次/每天/近来/Eh/Hari-hari”等；若出现请改写。',
-      '不得医疗承诺或诊断，不要使用“治愈/保证/奇迹”等词。',
-      '只输出最终文案正文（纯文本），不要解释，不要代码块。'
-    ].join('\n');
+    const SYSTEM_PROMPT = `
+你是马来西亚本地风格的中文社媒文案写手（不是品牌官号），写给朋友看的口吻。
+输出的文案必须自然、口语化，像真人日常发帖。
+中文为主，可少量 EN/BM 点缀（≤10%），自然嵌入即可。
+用短句，空行分段，每句只表达一个意思；可用 ✅ ✨ — 等符号增强可读性。
+必须基于 <KB> 提供的事实写作，不得发明成分/功效/数据。
+技术点低调自然表达（如：小分子/道尔顿/10秒透皮/不进肠胃/KKM），只点到为止，不要堆砌。
+禁止医疗承诺或诊断词（如 治愈/奇迹/保证/100% 有效）。
+禁止使用模板化开头：例如 “最近/这阵子/有时候/常常/每次/每天/近来/Eh/Hari-hari”等；如出现请改写。
+只输出最终文案正文（纯文本），不要解释，不要代码块。
+
+[STYLE_EXAMPLES]
+以下示例仅用于学习节奏、emoji、清单与 hashtags 习惯，请模仿其口吻与结构：
+
+例1（AirVo 症状型）
+#鼻塞的苦日子 每秒不是在忙着呼吸，就是在zut到鼻子脱皮 🤧
+.
+晚上最惨！鼻塞着 + 睡不好…
+每口气都像背着沙包， #胸口快闷炸了！󰷹
+.
+❄ 还好遇到了 AirVo 鼻敏感舒缓霜！
+1天只需轻轻 #涂抹2次在胸口上，10秒就透进血液，整个人呼吸都顺了～🥰
+.
+✅ 鼻孔终于“凉凉”的，畅通啦 👃
+✅ 呼吸轻松，晚上安心睡到天亮！🫁
+.
+AirVo 采用德国技术把草本成分分解成超小分子，加上日本水解技术，#吸收率高达90%！不经过肠胃、#不伤肝，效果快看得见！
+.
+那种终于能顺口呼吸的感觉，鼻炎人懂的！🥹
+记得Like&Share分享出去，拯救鼻炎星人！
+.
+.
+.
+#AirVo #改善鼻炎 #舒缓鼻塞 #缓解咳嗽 #增强肺活量 #润肺止咳 #保护肺功能 #呼吸顺畅的秘诀 #提升免疫系统 #创新涂抹式AirVo呼吸霜 #无负担的AirVo #10secHerbs
+
+例2（AirVo 产品介绍型）
+没想到 AirVo 一抹，呼吸瞬间顺顺啦～ 现在 #不再被鼻塞折磨 着了！🍃
+.
+每早醒来，鼻子塞到连气都吸不上去，只能用嘴硬吸气...
+胸口闷得像压了块石头，半夜都没好觉睡！󰷹
+.
+自从用了【AirVo 鼻敏感舒缓霜】 每天轻轻 #涂抹2次，活性草本成分 #10秒透皮吸收，快速 #舒缓鼻塞和充血，让呼吸立刻顺畅啦！
+.
+✨ 快速缓解鼻塞，呼吸瞬间轻松
+✨ 早上顺畅呼吸，整天神清气爽
+✨ 减轻过敏症状，改善鼻痒和流鼻涕困扰
+.
+AirVo 创新打破传统，#不用吃药打针，特别推荐肠胃敏感的人❌💊
+它还利用德国道尔顿先进技术，把草本成分分解成 200–500 #小分子，再通过日本水解技术 #增强皮肤吸收，由微血管进入全身循环。
+.
+✅ 透皮吸收率高达 90%
+✅ 100% 天然草药，安全无刺激
+✅ 通过 KKM 认证、⛔无化学添加、⛔无肝脏负担
+📌 适合人群：敏感体质、上班族、3岁以上小孩也能安心使用哦
+.
+如今，AirVo 已成为名副其实的 “涂抹式天然保健”，深受全球用户喜爱啦！
+.
+别再让鼻塞毁掉早晨的好心情～
+📩 马上 PM 一对一咨询，体验每天都能轻松呼吸、神清气爽！
+.
+.
+.
+#AirVo #改善鼻炎 #舒缓鼻塞 #缓解咳嗽 #增强肺活量 #润肺止咳 #保护肺功能 #呼吸顺畅的秘诀 #提升免疫系统 #创新涂抹式AirVo呼吸霜 #无负担的AirVo #10secHerbs
+
+例3（TriGuard 案例型）
+今天这位大哥来我们这里做健康检查，
+结果一测——血糖竟然 9.3！😨
+“平常吃得清淡，怎么血糖会偏高？”
+他自己也吓了一跳💥
+-
+我们现场让他试用了【TriGuard控糖霜】👇
+✅ 涂抹式草本控糖
+✅ 不进肚子、不伤肝
+✅ 采用道尔顿分子渗透技术，90%高吸收！
+⏱ 15分钟后，再测一次血糖——
+📉 结果从 9.3 → 降到 8.3‼️
+一抹见效，他整个人都放松了下来😌
+-
+想知道这位大哥的血糖到底怎样降下来？👇
+#TriGuard #控糖生活 #饭后不困 #10secHerbs
+`;
 
     const platformProfileBlock = JSON.stringify({
       platform: plat,
@@ -96,16 +169,14 @@ export async function POST(req: NextRequest) {
     }, null, 2);
     const kbBlock = JSON.stringify({ product_key: productKey, facts }, null, 2);
     const OUTPUT_RULES = [
-      '开头：用“场景/痛点/细节/话题#”吸睛；避免“你是否/有没有发现”等套路句。',
-      '开头需在以下模板中轮换：#话题 / 反问句 / 细节瞬间 / 场景画面；不得连续两次使用同一类型；如重复请改写。',
-      '结构：短句 + 空行 + “.” 分段；中段只用 <KB.facts> 的 2–4 个要点，避免说明书腔。',
-      '清单：必须用 ✅/✨/— 输出 3–4 条（体验/功效/技术/适用人群/使用方式/注意事项中任选，顺序随机），精炼、口语化，不堆技术。',
-      '语言：中文为主，EN/BM 仅点缀（≤5%）；若非必要请全中文。',
-      '用词：统一使用“涂抹/抹一抹/早晚各一次”等表达；避免与品类不符的“喷/贴”等词。',
-      '技术点：低调表达（小分子/10秒透皮/不经肠胃/KKM），不得医疗承诺与夸大数字。',
-      'CTA：按平台输出（FB=“PM我/私讯我”；也可 Like&Share）。',
-      'Hashtags：末尾一段，6–12 个，兼顾产品名/场景/功效。',
-      '输出：只给最终文案正文（纯文本），不要解释。'
+      '开头：用生活细节/场景/话题#任选其一，自然吸睛；避免“你是否/有没有发现”套话。',
+      '中段：从 <KB.facts> 中选 2–4 个点写成生活化句子；优先体验/功效，其次人群/使用；技术点轻描淡写。',
+      '清单：可选 2–3 条，用 ✅/✨/— 表达，简短有力；不是每篇都必须有。',
+      'Emoji：按 <emoji_range> 使用，分散在不同段落；不要一行堆两个。',
+      'Hashtags：必需；数量在 <hashtag_range> 内，置于文末一段；结合产品名/功效/场景/品牌。',
+      'CTA：按平台习惯收尾（FB=PM我/私讯我；小红书=留言+收藏；IG=点链接；TikTok=评论/私信）。',
+      '多样性：根据 variation_level 调整语气与开头；即使同变量多次生成，也要有不同感觉。',
+      '输出：只给最终文案正文（纯文本）。'
     ].join('\n');
 
     const userPrompt = ['<PLATFORM_PROFILE>', platformProfileBlock, '', '<KB>', kbBlock, '', '<OUTPUT_RULES>', OUTPUT_RULES].join('\n');
