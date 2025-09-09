@@ -20,6 +20,22 @@ export default function CaptionPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [lang, setLang] = useState<'zh' | 'en'>('zh');
   const [userEmail, setUserEmail] = useState<string>('');
+  // Keep last 3 opening prefixes to avoid repetitive openings across runs
+  const lastPrefixesRef = useRef<string[]>([]);
+
+  function extractOpeningPrefix(text: string): string {
+    try {
+      const s = String(text || '')
+        .split('\n')
+        .map(t => t.trim())
+        .find(t => t.length > 0) || '';
+      // Remove leading punctuation/hashtags/emojis roughly, keep letters/numbers/CJK
+      const cleaned = s.replace(/^[#\p{P}\s]+/u, '').replace(/\s+/g, '');
+      return cleaned.slice(0, 12);
+    } catch {
+      return '';
+    }
+  }
 
   const current = captions[idx] ?? '';
   // Final display fallback: if current is a JSON string like {"captions":[...]},
@@ -124,7 +140,12 @@ export default function CaptionPage() {
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ product, tone, platform }),
+        body: JSON.stringify({
+          product,
+          tone,
+          platform,
+          ban_opening_prefixes: lastPrefixesRef.current.slice(-3),
+        }),
       });
 
       if (!res.ok) throw new Error('Bad response');
@@ -211,6 +232,14 @@ export default function CaptionPage() {
       }
       const result = normalizeCaptions((data as any)?.captions).slice(0, 3);
       setCaptions(result);
+      // Update last 3 opening prefixes with the new caption
+      if (result && result.length > 0) {
+        const pfx = extractOpeningPrefix(result[0]);
+        if (pfx) {
+          const next = [...lastPrefixesRef.current, pfx];
+          lastPrefixesRef.current = next.slice(-3);
+        }
+      }
     } catch (e) {
       setHint('生成失败，请重试');
       setTimeout(() => setHint(''), 3000);
