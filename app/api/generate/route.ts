@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
-    const { product, tone, platform } = await req.json();
+    const { product, tone, platform, ban_opening_prefixes } = await req.json();
 
     // --- Minimal KB wiring & platform profiles (inline; no new files) ---
     const KB: any = kbJson as any;
@@ -15,6 +15,36 @@ export async function POST(req: NextRequest) {
       tiktok: { length_hint: 'short', emoji_range: [1, 3], hashtag_range: [3, 6], cta: 'comment', tone: 'playful' },
     } as const;
     type PlatformKey = keyof typeof PLATFORM_PROFILES;
+
+    // Opening schemas for varied first-line patterns
+    const OPENING_SCHEMAS = [
+      { name: 'hashtag_topic', tip: '以#话题开头，1-3个标签后接一句具体感受。避免模板化词。' },
+      { name: 'detail_moment', tip: '用一个细节瞬间描写（时间/场景/动作/感受），不问句。' },
+      { name: 'rhetorical_question', tip: '用反问句引入，但不要使用“你是否/有没有/是不是”这类模板词。换一种更生活的问法。' },
+      { name: 'micro_story', tip: '用一句超短小故事开场（人物+动作+情绪），自然口语。' },
+      { name: 'surprising_fact', tip: '用一个让人意外的小事实或体验差异开场，口语化。' },
+      { name: 'dialogue_line', tip: '用一行对话引入（不加引号也行），像朋友聊天。' },
+      { name: 'pain_point_punch', tip: '痛点直击但避免套路词，像“今晚又被鼻塞吵醒了”。' },
+      { name: 'scene_visual', tip: '画面感开头（触觉/听觉/视觉），一句话讲清。' },
+    ] as const;
+
+    function pickSchema(exclude?: string) {
+      const pool = OPENING_SCHEMAS.filter(s => s.name !== exclude);
+      return pool[Math.floor(Math.random() * pool.length)];
+    }
+
+    function extractOpeningPrefix(text: string): string {
+      try {
+        const firstNonEmpty = String(text || '')
+          .split('\n')
+          .map(t => t.trim())
+          .find(t => t.length > 0) || '';
+        const cleaned = firstNonEmpty.replace(/^[#\p{P}\s]+/u, '').replace(/\s+/g, '');
+        return cleaned.slice(0, 12);
+      } catch {
+        return '';
+      }
+    }
 
     function normalizeProductKey(keyRaw: string): string {
       const k = (keyRaw || '').toLowerCase();
@@ -161,7 +191,7 @@ AirVo 创新打破传统，#不用吃药打针，特别推荐肠胃敏感的人�
 #TriGuard #控糖生活 #饭后不困 #10secHerbs
 `;
 
-    const platformProfileBlock = JSON.stringify({
+    const platformProfileBlockBase = JSON.stringify({
       platform: plat,
       ...PLATFORM_PROFILES[plat],
       tone: 'light',
@@ -178,122 +208,159 @@ AirVo 创新打破传统，#不用吃药打针，特别推荐肠胃敏感的人�
       '多样性：根据 variation_level 调整语气与开头；即使同变量多次生成，也要有不同感觉。',
       '输出：只给最终文案正文（纯文本）。'
     ].join('\n');
+    // Helper: run one generation with a specific opening schema and variation token
+    async function generateOnce(openingSchemaName: string, variationToken: string, banPrefixes: string[]) {
+      const schema = OPENING_SCHEMAS.find(s => s.name === openingSchemaName) || pickSchema();
+      const openingBlock = JSON.stringify({ name: schema.name, tip: schema.tip }, null, 2);
+      const platformProfileBlock = platformProfileBlockBase; // unchanged core profile
+      const userPrompt = [
+        `variation_token: ${variationToken}`,
+        '<OPENING_SCHEMA>', openingBlock,
+        '',
+        '<PLATFORM_PROFILE>', platformProfileBlock,
+        '',
+        '<KB>', kbBlock,
+        '',
+        '<BAN_OPENING_PREFIXES>', JSON.stringify({ ban_opening_prefixes: Array.isArray(banPrefixes) ? banPrefixes : [] }, null, 2),
+        '',
+        '<OUTPUT_RULES>', OUTPUT_RULES,
+        '\n要求：开头必须符合 <OPENING_SCHEMA>，且避免与最近样式/句式雷同；并且禁止开头与 <BAN_OPENING_PREFIXES> 中任一前缀相同或仅作轻微改写（同义替换/标点变化/emoji 变化也算相似）。如有冲突，请改写为不同风格和不同用词。开头请写到自然、有信息量，不要过于空泛。'
+      ].join('\n');
 
-    const userPrompt = ['<PLATFORM_PROFILE>', platformProfileBlock, '', '<KB>', kbBlock, '', '<OUTPUT_RULES>', OUTPUT_RULES].join('\n');
+      const payload = {
+        model: (process.env.GEN_MODEL as string) || 'deepseek-chat',
+        temperature: 0.9,
+        top_p: 0.95,
+        frequency_penalty: 0.2,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: userPrompt },
+        ],
+      } as const;
 
-    const payload = {
-      model: (process.env.GEN_MODEL as string) || 'deepseek-chat',
-      temperature: 0.9,
-      top_p: 0.95,
-      frequency_penalty: 0.2,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: userPrompt },
-      ],
-    } as const;
-
-    const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      const errorText = await res.text();
-      return NextResponse.json({ error: 'Upstream model error', detail: errorText }, { status: 502 });
-    }
-
-    const data = await res.json();
-    let text: string = data?.choices?.[0]?.message?.content ?? '';
-    // Strip code fences if present
-    text = text.replace(/^```[a-zA-Z]*\n|\n```$/g, '');
-    // Extract JSON slice if wrapped
-    const firstBrace = text.indexOf('{');
-    const lastBrace = text.lastIndexOf('}');
-    const jsonSlice = firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace
-      ? text.slice(firstBrace, lastBrace + 1)
-      : text;
-
-    let captions: string[] = [];
-    try {
-      const parsed = JSON.parse(jsonSlice);
-      if (Array.isArray(parsed?.captions)) {
-        captions = parsed.captions
-          .map((t: unknown) => String(t ?? '').trim())
-          .filter(Boolean)
-          .slice(0, 1);
+      const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        return { error: `Upstream model error: ${errorText}` } as const;
       }
-    } catch {
+
+      const data = await res.json();
+      let text: string = data?.choices?.[0]?.message?.content ?? '';
+      text = text.replace(/^```[a-zA-Z]*\n|\n```$/g, '');
+      const firstBrace = text.indexOf('{');
+      const lastBrace = text.lastIndexOf('}');
+      const jsonSlice = firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace
+        ? text.slice(firstBrace, lastBrace + 1)
+        : text;
+
+      let captions: string[] = [];
       try {
-        const repaired = jsonSlice
-          .replace(/[“”]/g, '"')
-          .replace(/[‘’]/g, "'")
-          .replace(/,\s*([}\]])/g, '$1')
-          .replace(/[\u200B-\u200D\uFEFF]/g, '');
-        const reparsed = JSON.parse(repaired);
-        if (Array.isArray(reparsed?.captions)) {
-          captions = reparsed.captions
+        const parsed = JSON.parse(jsonSlice);
+        if (Array.isArray(parsed?.captions)) {
+          captions = parsed.captions
             .map((t: unknown) => String(t ?? '').trim())
             .filter(Boolean)
             .slice(0, 1);
         }
       } catch {
-        // fall through
-      }
-    }
-
-    // Final normalization: always return clean string[] with real newlines
-    function finalizeNormalize(input: unknown): string[] {
-      try {
-        if (Array.isArray(input)) {
-          const flat: string[] = [];
-          for (const el of input) {
-            if (typeof el === 'string') {
-              const raw = el.trim();
-              if (raw.startsWith('{') || raw.startsWith('[') || raw.includes('"captions"')) {
-                try {
-                  const parsed = JSON.parse(raw);
-                  flat.push(...finalizeNormalize((parsed as any)?.captions ?? parsed));
-                  continue;
-                } catch {}
-              }
-              flat.push(raw.replace(/\\n/g, '\n'));
-            } else if (Array.isArray(el)) {
-              flat.push(...finalizeNormalize(el));
-            } else if (el && typeof el === 'object' && 'captions' in (el as any)) {
-              flat.push(...finalizeNormalize((el as any).captions));
-            } else if (el != null) {
-              flat.push(String(el));
-            }
+        try {
+          const repaired = jsonSlice
+            .replace(/[“”]/g, '"')
+            .replace(/[‘’]/g, "'")
+            .replace(/,\s*([}\]])/g, '$1')
+            .replace(/[\u200B-\u200D\uFEFF]/g, '');
+          const reparsed = JSON.parse(repaired);
+          if (Array.isArray(reparsed?.captions)) {
+            captions = reparsed.captions
+              .map((t: unknown) => String(t ?? '').trim())
+              .filter(Boolean)
+              .slice(0, 1);
           }
-          return flat.filter(Boolean).slice(0, 1);
-        }
-        if (typeof input === 'string') {
-          try {
-            const parsed = JSON.parse(input);
-            return finalizeNormalize((parsed as any)?.captions ?? parsed);
-          } catch {}
-          return [input.replace(/\\n/g, '\n').trim()].filter(Boolean).slice(0, 1);
-        }
-        return [];
-      } catch {
-        return [];
+        } catch {}
       }
+
+      function finalizeNormalize(input: unknown): string[] {
+        try {
+          if (Array.isArray(input)) {
+            const flat: string[] = [];
+            for (const el of input) {
+              if (typeof el === 'string') {
+                const raw = el.trim();
+                if (raw.startsWith('{') || raw.startsWith('[') || raw.includes('"captions"')) {
+                  try {
+                    const parsed = JSON.parse(raw);
+                    flat.push(...finalizeNormalize((parsed as any)?.captions ?? parsed));
+                    continue;
+                  } catch {}
+                }
+                flat.push(raw.replace(/\\n/g, '\n'));
+              } else if (Array.isArray(el)) {
+                flat.push(...finalizeNormalize(el));
+              } else if (el && typeof el === 'object' && 'captions' in (el as any)) {
+                flat.push(...finalizeNormalize((el as any).captions));
+              } else if (el != null) {
+                flat.push(String(el));
+              }
+            }
+            return flat.filter(Boolean).slice(0, 1);
+          }
+          if (typeof input === 'string') {
+            try {
+              const parsed = JSON.parse(input);
+              return finalizeNormalize((parsed as any)?.captions ?? parsed);
+            } catch {}
+            return [input.replace(/\\n/g, '\n').trim()].filter(Boolean).slice(0, 1);
+          }
+          return [];
+        } catch {
+          return [];
+        }
+      }
+
+      const finalCaptions = captions.length > 0 ? finalizeNormalize(captions) : finalizeNormalize(text);
+      const openingPrefix = finalCaptions[0] ? extractOpeningPrefix(finalCaptions[0]) : '';
+      return { finalCaptions, openingPrefix, schemaUsed: schema.name } as const;
     }
 
-    const finalCaptions = captions.length > 0 ? finalizeNormalize(captions) : finalizeNormalize(text);
+    const banList: string[] = Array.isArray(ban_opening_prefixes)
+      ? (ban_opening_prefixes as unknown[]).map(v => String(v || '')).filter(Boolean).slice(-3)
+      : [];
 
-    return new NextResponse(
-      JSON.stringify({ captions: finalCaptions }),
-      {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-store, max-age=0',
-        },
+    // Attempt up to 2 times: initial + one retry with different schema if opening collides
+    const firstSchema = pickSchema();
+    const first = await generateOnce(firstSchema.name, Math.random().toString(36).slice(2) + Date.now(), banList);
+    if ('error' in first) {
+      return NextResponse.json({ error: first.error }, { status: 502 });
+    }
+    const firstTooShort = !first.openingPrefix || first.openingPrefix.length < 4;
+    if ((first.openingPrefix && banList.includes(first.openingPrefix)) || firstTooShort) {
+      const retrySchema = pickSchema(first.schemaUsed);
+      const second = await generateOnce(retrySchema.name, Math.random().toString(36).slice(2) + Date.now(), banList);
+      if ('error' in second) {
+        // fallback to first if retry failed upstream
+        return new NextResponse(
+          JSON.stringify({ captions: first.finalCaptions, opening_prefix: first.openingPrefix, schema_used: first.schemaUsed }),
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
+        );
       }
+      // if second still collides, return second anyway (已重试一次)
+      return new NextResponse(
+        JSON.stringify({ captions: second.finalCaptions, opening_prefix: second.openingPrefix, schema_used: retrySchema.name }),
+        { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
+      );
+    }
+
+    // first is fine
+    return new NextResponse(
+      JSON.stringify({ captions: first.finalCaptions, opening_prefix: first.openingPrefix, schema_used: first.schemaUsed }),
+      { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
     );
   } catch (err: unknown) {
     return NextResponse.json(
