@@ -109,6 +109,16 @@ export default function CaptionPage() {
     } catch {}
   }, [product, tone, platform]);
 
+  // Load last 3 opening prefixes from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('caption:lastPrefixes') || 'null');
+      if (Array.isArray(saved)) {
+        lastPrefixesRef.current = saved.slice(-3).map((v)=>String(v||'')).filter(Boolean);
+      }
+    } catch {}
+  }, []);
+
   // Fetch current auth user email for menu display
   useEffect(() => {
     let alive = true;
@@ -232,13 +242,19 @@ export default function CaptionPage() {
       }
       const result = normalizeCaptions((data as any)?.captions).slice(0, 3);
       setCaptions(result);
-      // Update last 3 opening prefixes with the new caption
-      if (result && result.length > 0) {
-        const pfx = extractOpeningPrefix(result[0]);
-        if (pfx) {
-          const next = [...lastPrefixesRef.current, pfx];
-          lastPrefixesRef.current = next.slice(-3);
-        }
+      // Update last 3 opening prefixes with backend-provided opening_prefix first; fallback to local extraction
+      let pfx = '';
+      try {
+        const backendPfx = (data as any)?.opening_prefix;
+        if (typeof backendPfx === 'string') pfx = String(backendPfx).trim();
+      } catch {}
+      if (!pfx && result && result.length > 0) {
+        pfx = extractOpeningPrefix(result[0]);
+      }
+      if (pfx) {
+        const next = [...lastPrefixesRef.current, pfx].slice(-3);
+        lastPrefixesRef.current = next;
+        try { localStorage.setItem('caption:lastPrefixes', JSON.stringify(next)); } catch {}
       }
     } catch (e) {
       setHint('生成失败，请重试');

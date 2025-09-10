@@ -209,7 +209,7 @@ AirVo 创新打破传统，#不用吃药打针，特别推荐肠胃敏感的人�
       '输出：只给最终文案正文（纯文本）。'
     ].join('\n');
     // Helper: run one generation with a specific opening schema and variation token
-    async function generateOnce(openingSchemaName: string, variationToken: string) {
+    async function generateOnce(openingSchemaName: string, variationToken: string, banPrefixes: string[]) {
       const schema = OPENING_SCHEMAS.find(s => s.name === openingSchemaName) || pickSchema();
       const openingBlock = JSON.stringify({ name: schema.name, tip: schema.tip }, null, 2);
       const platformProfileBlock = platformProfileBlockBase; // unchanged core profile
@@ -221,8 +221,10 @@ AirVo 创新打破传统，#不用吃药打针，特别推荐肠胃敏感的人�
         '',
         '<KB>', kbBlock,
         '',
+        '<BAN_OPENING_PREFIXES>', JSON.stringify({ ban_opening_prefixes: Array.isArray(banPrefixes) ? banPrefixes : [] }, null, 2),
+        '',
         '<OUTPUT_RULES>', OUTPUT_RULES,
-        '\n要求：开头必须符合 <OPENING_SCHEMA>，且避免与最近样式/句式雷同。'
+        '\n要求：开头必须符合 <OPENING_SCHEMA>，且避免与最近样式/句式雷同；并且禁止开头与 <BAN_OPENING_PREFIXES> 中任一前缀相同或仅作轻微改写（同义替换/标点变化/emoji 变化也算相似）。如有冲突，请改写为不同风格和不同用词。开头请写到自然、有信息量，不要过于空泛。'
       ].join('\n');
 
       const payload = {
@@ -333,30 +335,31 @@ AirVo 创新打破传统，#不用吃药打针，特别推荐肠胃敏感的人�
 
     // Attempt up to 2 times: initial + one retry with different schema if opening collides
     const firstSchema = pickSchema();
-    const first = await generateOnce(firstSchema.name, Math.random().toString(36).slice(2) + Date.now());
+    const first = await generateOnce(firstSchema.name, Math.random().toString(36).slice(2) + Date.now(), banList);
     if ('error' in first) {
       return NextResponse.json({ error: first.error }, { status: 502 });
     }
-    if (first.openingPrefix && banList.includes(first.openingPrefix)) {
+    const firstTooShort = !first.openingPrefix || first.openingPrefix.length < 4;
+    if ((first.openingPrefix && banList.includes(first.openingPrefix)) || firstTooShort) {
       const retrySchema = pickSchema(first.schemaUsed);
-      const second = await generateOnce(retrySchema.name, Math.random().toString(36).slice(2) + Date.now());
+      const second = await generateOnce(retrySchema.name, Math.random().toString(36).slice(2) + Date.now(), banList);
       if ('error' in second) {
         // fallback to first if retry failed upstream
         return new NextResponse(
-          JSON.stringify({ captions: first.finalCaptions }),
+          JSON.stringify({ captions: first.finalCaptions, opening_prefix: first.openingPrefix, schema_used: first.schemaUsed }),
           { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
         );
       }
       // if second still collides, return second anyway (已重试一次)
       return new NextResponse(
-        JSON.stringify({ captions: second.finalCaptions }),
+        JSON.stringify({ captions: second.finalCaptions, opening_prefix: second.openingPrefix, schema_used: retrySchema.name }),
         { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
       );
     }
 
     // first is fine
     return new NextResponse(
-      JSON.stringify({ captions: first.finalCaptions }),
+      JSON.stringify({ captions: first.finalCaptions, opening_prefix: first.openingPrefix, schema_used: first.schemaUsed }),
       { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
     );
   } catch (err: unknown) {
