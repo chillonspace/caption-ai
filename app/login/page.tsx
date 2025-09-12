@@ -15,13 +15,33 @@ export default function LoginPage() {
     e.preventDefault();
     setErr(null);
     setLoading(true);
-    const { error } = await sb.auth.signInWithPassword({ email, password: pw });
-    setLoading(false);
-    if (error) {
-      setErr(error.message);
-      return;
+    try {
+      const { data: { user }, error: authErr } = await sb.auth.signInWithPassword({ email, password: pw });
+      if (authErr) {
+        setLoading(false);
+        setErr(authErr.message);
+        return;
+      }
+
+      // After login, check app_metadata.active; if falsey, send to payment link
+      const active = Boolean((user?.app_metadata as any)?.active);
+      if (active) {
+        setLoading(false);
+        location.href = '/caption';
+        return;
+      }
+
+      // Not active → redirect to Stripe Payment Link
+      const paymentLink = process.env.NEXT_PUBLIC_STRIPE_PAYMENT_LINK_URL;
+      if (paymentLink) {
+        location.href = paymentLink;
+      } else {
+        setErr('Payment link is not configured');
+      }
+    } catch (e: unknown) {
+      setErr((e as Error)?.message ?? 'Login failed');
+      setLoading(false);
     }
-    location.href = '/caption';
   }
 
   // If already logged in, redirect to /caption
