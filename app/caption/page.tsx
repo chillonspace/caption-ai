@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const PRODUCTS = ['AirVo', 'TriGuard', 'FloMix', 'TrioCare', 'FleXa'];
-const STYLES = ['朋友介绍口吻', '推销口吻'];
+const STYLE_OPTIONS_ZH = ['随机', '故事', '痛点', '日常', '技术', '促销'] as const;
 const PLATFORMS = ['Facebook'];
 
 export default function CaptionPage() {
@@ -13,6 +13,7 @@ export default function CaptionPage() {
   const [product, setProduct] = useState('');
   const [tone, setTone] = useState('');
   const [platform, setPlatform] = useState('Facebook');
+  const [styleZh, setStyleZh] = useState<string>('随机');
   const [loading, setLoading] = useState(false);
   const [captions, setCaptions] = useState<string[]>([]);
   const [idx, setIdx] = useState(0);
@@ -99,15 +100,16 @@ export default function CaptionPage() {
         if (saved.product) setProduct(saved.product);
         if (saved.tone) setTone(saved.tone);
         if (saved.platform) setPlatform(saved.platform);
+        if (saved.styleZh) setStyleZh(saved.styleZh);
       }
     } catch {}
   }, []);
 
   useEffect(() => {
     try {
-      localStorage.setItem('caption:prefs', JSON.stringify({ product, tone, platform }));
+      localStorage.setItem('caption:prefs', JSON.stringify({ product, tone, platform, styleZh }));
     } catch {}
-  }, [product, tone, platform]);
+  }, [product, tone, platform, styleZh]);
 
   // Load last 3 opening prefixes from localStorage on mount
   useEffect(() => {
@@ -154,12 +156,22 @@ export default function CaptionPage() {
           product,
           tone,
           platform,
+          style: styleZh,
           ban_opening_prefixes: lastPrefixesRef.current.slice(-3),
         }),
       });
 
       if (!res.ok) throw new Error('Bad response');
       const data = await res.json();
+      // Prefer opening prefix from response header when available
+      try {
+        const pfxHeader = res.headers.get('X-Opening-Prefix');
+        if (pfxHeader) {
+          const next = [...lastPrefixesRef.current, String(pfxHeader).trim()].slice(-3);
+          lastPrefixesRef.current = next;
+          try { localStorage.setItem('caption:lastPrefixes', JSON.stringify(next)); } catch {}
+        }
+      } catch {}
       // Defensive normalization: always produce string[] even if backend returns a JSON string
       function normalizeCaptions(input: unknown): string[] {
         try {
@@ -242,7 +254,7 @@ export default function CaptionPage() {
       }
       const result = normalizeCaptions((data as any)?.captions).slice(0, 3);
       setCaptions(result);
-      // Update last 3 opening prefixes with backend-provided opening_prefix first; fallback to local extraction
+      // Update last 3 opening prefixes with backend-provided opening_prefix first; fallback to header/local extraction
       let pfx = '';
       try {
         const backendPfx = (data as any)?.opening_prefix;
@@ -347,17 +359,19 @@ export default function CaptionPage() {
               ))}
             </select>
 
-            <select
-              value={tone}
-              onChange={(e) => setTone(e.target.value)}
-              className="select"
-              style={{ color: tone ? 'var(--text)' : 'var(--text-muted)' }}
-            >
-              <option value="" disabled>请选择风格</option>
-              {STYLES.map((s) => (
-                <option key={s} value={s}>{s}</option>
+            {/* Style buttons (中文) */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+              {STYLE_OPTIONS_ZH.map((s) => (
+                <button
+                  key={s}
+                  className={s === styleZh ? 'btn-dark' : 'btn-secondary'}
+                  onClick={() => setStyleZh(s)}
+                  style={{ padding: '10px 8px' }}
+                >
+                  {s}
+                </button>
               ))}
-            </select>
+            </div>
 
             <select
               value={platform}
