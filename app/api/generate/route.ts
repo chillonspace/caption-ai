@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
-    const { product, tone, platform, ban_opening_prefixes } = await req.json();
+    const { product, tone, platform, ban_opening_prefixes, style } = await req.json();
 
     // --- Minimal KB wiring & platform profiles (inline; no new files) ---
     const KB: any = kbJson as any;
@@ -32,6 +32,44 @@ export async function POST(req: NextRequest) {
       const pool = OPENING_SCHEMAS.filter(s => s.name !== exclude);
       return pool[Math.floor(Math.random() * pool.length)];
     }
+
+    // Style normalization (中文/英文 → 内部键)
+    function normalizeStyle(input?: unknown): 'random' | 'story' | 'pain' | 'daily' | 'tech' | 'promo' {
+      const raw = String((input as string) || '').trim();
+      const map: Record<string, 'random' | 'story' | 'pain' | 'daily' | 'tech' | 'promo'> = {
+        随机: 'random', 故事: 'story', 痛点: 'pain', 日常: 'daily', 技术: 'tech', 促销: 'promo',
+        random: 'random', story: 'story', pain: 'pain', daily: 'daily', tech: 'tech', promo: 'promo',
+      };
+      return map[raw] || 'random';
+    }
+
+    const OPENING_SCHEMA: Record<'story'|'pain'|'daily'|'tech'|'promo', string[]> = {
+      story: [
+        '今天这位大哥来我们这里…',
+        '前几天一个客户做体检…',
+        '测出数据有点吓人…',
+      ],
+      pain: [
+        '#鼻塞的苦日子…',
+        '饭后一阵困，眼皮抬不起来…',
+        '久坐到腰酸背痛…',
+      ],
+      daily: [
+        '🌿每天一抹，就像给身体一个温柔的拥抱',
+        '早上起来抹一抹，整天轻松点',
+        '下班回家先抹一下，放松',
+      ],
+      tech: [
+        '✨ 外用小分子，10秒透皮吸收',
+        '德国+日本双技术加持，不经肠胃',
+        '轻轻一抹，走微循环',
+      ],
+      promo: [
+        '⚡名额有限，想试的现在私讯',
+        '📣 本周下单有礼，别错过',
+        '🔥 很多人在用，你也可以试试',
+      ],
+    };
 
     function extractOpeningPrefix(text: string): string {
       try {
@@ -209,13 +247,22 @@ AirVo 创新打破传统，#不用吃药打针，特别推荐肠胃敏感的人�
       '输出：只给最终文案正文（纯文本）。'
     ].join('\n');
     // Helper: run one generation with a specific opening schema and variation token
-    async function generateOnce(openingSchemaName: string, variationToken: string, banPrefixes: string[]) {
+    async function generateOnce(openingSchemaName: string, variationToken: string, banPrefixes: string[], styleKey: 'random'|'story'|'pain'|'daily'|'tech'|'promo') {
       const schema = OPENING_SCHEMAS.find(s => s.name === openingSchemaName) || pickSchema();
       const openingBlock = JSON.stringify({ name: schema.name, tip: schema.tip }, null, 2);
       const platformProfileBlock = platformProfileBlockBase; // unchanged core profile
+      const styleBlock = JSON.stringify({ type: styleKey }, null, 2);
+      const openings = styleKey === 'random'
+        ? OPENING_SCHEMA[(['story','pain','daily','tech','promo'])[Math.floor(Math.random()*5)] as 'story']
+        : OPENING_SCHEMA[styleKey] || OPENING_SCHEMA['story'];
+      const openingSeedBlock = JSON.stringify({ openings }, null, 2);
       const userPrompt = [
         `variation_token: ${variationToken}`,
         '<OPENING_SCHEMA>', openingBlock,
+        '',
+        '<STYLE>', styleBlock,
+        '',
+        '<OPENING_SEEDS>', openingSeedBlock,
         '',
         '<PLATFORM_PROFILE>', platformProfileBlock,
         '',
@@ -224,7 +271,7 @@ AirVo 创新打破传统，#不用吃药打针，特别推荐肠胃敏感的人�
         '<BAN_OPENING_PREFIXES>', JSON.stringify({ ban_opening_prefixes: Array.isArray(banPrefixes) ? banPrefixes : [] }, null, 2),
         '',
         '<OUTPUT_RULES>', OUTPUT_RULES,
-        '\n要求：开头必须符合 <OPENING_SCHEMA>，且避免与最近样式/句式雷同；并且禁止开头与 <BAN_OPENING_PREFIXES> 中任一前缀相同或仅作轻微改写（同义替换/标点变化/emoji 变化也算相似）。如有冲突，请改写为不同风格和不同用词。开头请写到自然、有信息量，不要过于空泛。'
+        '\n要求：第一句开头需从 <OPENING_SEEDS>.openings 任选其一进行自然改写（不要逐字复读）；同时符合 <OPENING_SCHEMA>。禁止与 <BAN_OPENING_PREFIXES> 中任一前缀相同或仅作轻微改写（同义替换/标点/emoji 变化也算相似）。如有冲突请换一种说法。开头要自然、有信息量，避免空泛。'
       ].join('\n');
 
       const payload = {
@@ -334,33 +381,34 @@ AirVo 创新打破传统，#不用吃药打针，特别推荐肠胃敏感的人�
       : [];
 
     // Attempt up to 2 times: initial + one retry with different schema if opening collides
+    const styleKey = normalizeStyle(style);
     const firstSchema = pickSchema();
-    const first = await generateOnce(firstSchema.name, Math.random().toString(36).slice(2) + Date.now(), banList);
+    const first = await generateOnce(firstSchema.name, Math.random().toString(36).slice(2) + Date.now(), banList, styleKey);
     if ('error' in first) {
       return NextResponse.json({ error: first.error }, { status: 502 });
     }
     const firstTooShort = !first.openingPrefix || first.openingPrefix.length < 4;
     if ((first.openingPrefix && banList.includes(first.openingPrefix)) || firstTooShort) {
       const retrySchema = pickSchema(first.schemaUsed);
-      const second = await generateOnce(retrySchema.name, Math.random().toString(36).slice(2) + Date.now(), banList);
+      const second = await generateOnce(retrySchema.name, Math.random().toString(36).slice(2) + Date.now(), banList, styleKey);
       if ('error' in second) {
         // fallback to first if retry failed upstream
         return new NextResponse(
-          JSON.stringify({ captions: first.finalCaptions, opening_prefix: first.openingPrefix, schema_used: first.schemaUsed }),
-          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
+          JSON.stringify({ captions: first.finalCaptions }),
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix': first.openingPrefix || '' } }
         );
       }
       // if second still collides, return second anyway (已重试一次)
       return new NextResponse(
-        JSON.stringify({ captions: second.finalCaptions, opening_prefix: second.openingPrefix, schema_used: retrySchema.name }),
-        { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
+        JSON.stringify({ captions: second.finalCaptions }),
+        { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix': second.openingPrefix || '' } }
       );
     }
 
     // first is fine
     return new NextResponse(
-      JSON.stringify({ captions: first.finalCaptions, opening_prefix: first.openingPrefix, schema_used: first.schemaUsed }),
-      { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
+      JSON.stringify({ captions: first.finalCaptions }),
+      { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix': first.openingPrefix || '' } }
     );
   } catch (err: unknown) {
     return NextResponse.json(
