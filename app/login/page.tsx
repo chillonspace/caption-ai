@@ -50,7 +50,8 @@ export default function LoginPage() {
     (async () => {
       try {
         const { data: { user } } = await sb.auth.getUser();
-        if (alive && user) location.href = '/caption';
+        const active = Boolean((user?.app_metadata as any)?.active);
+        if (alive && user && active) location.href = '/caption';
       } catch {}
     })();
     return () => { alive = false; };
