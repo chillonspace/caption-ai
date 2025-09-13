@@ -27,7 +27,6 @@ async function getEmailFromStripe(stripe: Stripe, event: Stripe.Event): Promise<
       if (data?.customer_email) return data.customer_email as string;
       if (data?.customer) {
         const cust = await stripe.customers.retrieve(data.customer as string);
-        // @ts-expect-error Stripe types allow string|null
         return (cust as any)?.email ?? null;
       }
       return null;
@@ -37,7 +36,6 @@ async function getEmailFromStripe(stripe: Stripe, event: Stripe.Event): Promise<
     if (type.startsWith('customer.subscription.')) {
       if (data?.customer) {
         const cust = await stripe.customers.retrieve(data.customer as string);
-        // @ts-expect-error Stripe types allow string|null
         return (cust as any)?.email ?? null;
       }
       return null;
@@ -140,3 +138,4 @@ export async function POST(req: NextRequest) {
 }
 
 
+// noop: trigger redeploy
