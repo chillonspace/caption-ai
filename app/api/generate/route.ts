@@ -246,8 +246,47 @@ AirVo 创新打破传统，#不用吃药打针，特别推荐肠胃敏感的人�
       '多样性：根据 variation_level 调整语气与开头；即使同变量多次生成，也要有不同感觉。',
       '输出：只给最终文案正文（纯文本）。'
     ].join('\n');
+    // Simple similarity utilities for opening prefix (char-level 3-gram Jaccard)
+    function toNgrams(input: string, n = 3): Set<string> {
+      const s = (input || '').trim();
+      const grams = new Set<string>();
+      if (s.length < n) {
+        grams.add(s);
+        return grams;
+      }
+      for (let i = 0; i <= s.length - n; i++) {
+        grams.add(s.slice(i, i + n));
+      }
+      return grams;
+    }
+    function jaccard(a: string, b: string): number {
+      const A = toNgrams(a, 3);
+      const B = toNgrams(b, 3);
+      let inter = 0;
+      for (const x of A) if (B.has(x)) inter++;
+      const union = A.size + B.size - inter || 1;
+      return inter / union;
+    }
+    function isSimilarToAny(prefix: string, banned: string[], threshold = 0.8): boolean {
+      if (!prefix) return false;
+      for (const b of banned) {
+        if (!b) continue;
+        if (b === prefix) return true;
+        if (jaccard(prefix, b) >= threshold) return true;
+      }
+      return false;
+    }
+
+    // SLA fallback toggle (default off)
+    const ENABLE_SLA = (process.env.SLA_FALLBACK === '1' || process.env.SLA_FALLBACK === 'true');
     // Helper: run one generation with a specific opening schema and variation token
-    async function generateOnce(openingSchemaName: string, variationToken: string, banPrefixes: string[], styleKey: 'random'|'story'|'pain'|'daily'|'tech'|'promo') {
+    async function generateOnce(
+      openingSchemaName: string,
+      variationToken: string,
+      banPrefixes: string[],
+      styleKey: 'random'|'story'|'pain'|'daily'|'tech'|'promo',
+      options?: { timeoutMs?: number; quick?: boolean }
+    ) {
       const schema = OPENING_SCHEMAS.find(s => s.name === openingSchemaName) || pickSchema();
       const openingBlock = JSON.stringify({ name: schema.name, tip: schema.tip }, null, 2);
       const platformProfileBlock = platformProfileBlockBase; // unchanged core profile
@@ -256,6 +295,9 @@ AirVo 创新打破传统，#不用吃药打针，特别推荐肠胃敏感的人�
         ? OPENING_SCHEMA[(['story','pain','daily','tech','promo'])[Math.floor(Math.random()*5)] as 'story']
         : OPENING_SCHEMA[styleKey] || OPENING_SCHEMA['story'];
       const openingSeedBlock = JSON.stringify({ openings }, null, 2);
+      const quickRules = options?.quick
+        ? '\n[QUICK]\n输出为120–180字，≤2条清单（可选），必须包含 hashtags；保持口语自然。'
+        : '';
       const userPrompt = [
         `variation_token: ${variationToken}`,
         '<OPENING_SCHEMA>', openingBlock,
@@ -271,7 +313,7 @@ AirVo 创新打破传统，#不用吃药打针，特别推荐肠胃敏感的人�
         '<BAN_OPENING_PREFIXES>', JSON.stringify({ ban_opening_prefixes: Array.isArray(banPrefixes) ? banPrefixes : [] }, null, 2),
         '',
         '<OUTPUT_RULES>', OUTPUT_RULES,
-        '\n要求：第一句开头需从 <OPENING_SEEDS>.openings 任选其一进行自然改写（不要逐字复读）；同时符合 <OPENING_SCHEMA>。禁止与 <BAN_OPENING_PREFIXES> 中任一前缀相同或仅作轻微改写（同义替换/标点/emoji 变化也算相似）。如有冲突请换一种说法。开头要自然、有信息量，避免空泛。'
+        '\n要求：第一句开头需从 <OPENING_SEEDS>.openings 任选其一进行自然改写（不要逐字复读）；同时符合 <OPENING_SCHEMA>。禁止与 <BAN_OPENING_PREFIXES> 中任一前缀相同或仅作轻微改写（同义替换/标点/emoji 变化也算相似）。如有冲突请换一种说法。开头要自然、有信息量，避免空泛。' + quickRules
       ].join('\n');
 
       const payload = {
@@ -285,14 +327,30 @@ AirVo 创新打破传统，#不用吃药打针，特别推荐肠胃敏感的人�
         ],
       } as const;
 
-      const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
+      const controller = new AbortController();
+      const timeoutId = options?.timeoutMs && options.timeoutMs > 0
+        ? setTimeout(() => controller.abort(), options!.timeoutMs)
+        : null;
+      let res: Response;
+      try {
+        res = await fetch('https://api.deepseek.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
+      } catch (e: any) {
+        if (e?.name === 'AbortError') {
+          if (timeoutId) clearTimeout(timeoutId);
+          return { timeout: true } as const;
+        }
+        if (timeoutId) clearTimeout(timeoutId);
+        return { error: String(e?.message || e) } as const;
+      }
+      if (timeoutId) clearTimeout(timeoutId);
       if (!res.ok) {
         const errorText = await res.text();
         return { error: `Upstream model error: ${errorText}` } as const;
@@ -383,19 +441,73 @@ AirVo 创新打破传统，#不用吃药打针，特别推荐肠胃敏感的人�
     // Attempt up to 2 times: initial + one retry with different schema if opening collides
     const styleKey = normalizeStyle(style);
     const firstSchema = pickSchema();
-    const first = await generateOnce(firstSchema.name, Math.random().toString(36).slice(2) + Date.now(), banList, styleKey);
+    const first = await generateOnce(
+      firstSchema.name,
+      Math.random().toString(36).slice(2) + Date.now(),
+      banList,
+      styleKey,
+      ENABLE_SLA ? { timeoutMs: 8000 } : undefined
+    );
     if ('error' in first) {
       return NextResponse.json({ error: first.error }, { status: 502 });
     }
+    if ('timeout' in first && first.timeout === true) {
+      // SLA quick fallback
+      const retryQuick = await generateOnce(
+        pickSchema().name,
+        Math.random().toString(36).slice(2) + Date.now(),
+        banList,
+        styleKey,
+        ENABLE_SLA ? { timeoutMs: 1500, quick: true } : { quick: true }
+      );
+      if (!('error' in retryQuick) && !('timeout' in retryQuick)) {
+        return new NextResponse(
+          JSON.stringify({ captions: retryQuick.finalCaptions }),
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix': retryQuick.openingPrefix || '' } }
+        );
+      }
+      // Ultimate local fallback (very short template from KB)
+      const flatFacts = Object.values(facts).flat().filter(Boolean) as string[];
+      const pick = (arr: string[]) => arr[Math.floor(Math.random()*arr.length)] || '';
+      const p1 = pick(facts.体验) || pick(facts.功效) || pick(flatFacts);
+      const p2 = pick(facts.功效) || pick(flatFacts);
+      const tags = ['#10secHerbs', `#${productKey}`].concat([pick(flatFacts), pick(flatFacts)].filter(Boolean).slice(0,2)).slice(0,5).map(t=>`#${String(t).replace(/\s+/g,'')}`);
+      const local = [p1, p2, '', tags.join(' ')].filter(Boolean).join('\n');
+      return new NextResponse(
+        JSON.stringify({ captions: [local] }),
+        { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix': extractOpeningPrefix(local) } }
+      );
+    }
     const firstTooShort = !first.openingPrefix || first.openingPrefix.length < 4;
-    if ((first.openingPrefix && banList.includes(first.openingPrefix)) || firstTooShort) {
+    if ((first.openingPrefix && isSimilarToAny(first.openingPrefix, banList, 0.8)) || firstTooShort) {
       const retrySchema = pickSchema(first.schemaUsed);
-      const second = await generateOnce(retrySchema.name, Math.random().toString(36).slice(2) + Date.now(), banList, styleKey);
+      const second = await generateOnce(retrySchema.name, Math.random().toString(36).slice(2) + Date.now(), banList, styleKey, ENABLE_SLA ? { timeoutMs: 8000 } : undefined);
       if ('error' in second) {
         // fallback to first if retry failed upstream
         return new NextResponse(
           JSON.stringify({ captions: first.finalCaptions }),
           { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix': first.openingPrefix || '' } }
+        );
+      }
+      if ('timeout' in second && second.timeout === true) {
+        // quick fallback for retry branch as well
+        const quick = await generateOnce(
+          pickSchema(retrySchema.name).name,
+          Math.random().toString(36).slice(2) + Date.now(),
+          banList,
+          styleKey,
+          ENABLE_SLA ? { timeoutMs: 1500, quick: true } : { quick: true }
+        );
+        if (!('error' in quick) && !('timeout' in quick)) {
+          return new NextResponse(
+            JSON.stringify({ captions: quick.finalCaptions }),
+            { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix': quick.openingPrefix || '' } }
+          );
+        }
+        const local2 = first.finalCaptions[0] || '';
+        return new NextResponse(
+          JSON.stringify({ captions: [local2] }),
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix': extractOpeningPrefix(local2) } }
         );
       }
       // if second still collides, return second anyway (已重试一次)

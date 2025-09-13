@@ -163,6 +163,15 @@ export default function CaptionPage() {
 
       if (!res.ok) throw new Error('Bad response');
       const data = await res.json();
+      // Prefer opening prefix from response header when available
+      try {
+        const pfxHeader = res.headers.get('X-Opening-Prefix');
+        if (pfxHeader) {
+          const next = [...lastPrefixesRef.current, String(pfxHeader).trim()].slice(-3);
+          lastPrefixesRef.current = next;
+          try { localStorage.setItem('caption:lastPrefixes', JSON.stringify(next)); } catch {}
+        }
+      } catch {}
       // Defensive normalization: always produce string[] even if backend returns a JSON string
       function normalizeCaptions(input: unknown): string[] {
         try {
@@ -245,7 +254,7 @@ export default function CaptionPage() {
       }
       const result = normalizeCaptions((data as any)?.captions).slice(0, 3);
       setCaptions(result);
-      // Update last 3 opening prefixes with backend-provided opening_prefix first; fallback to local extraction
+      // Update last 3 opening prefixes with backend-provided opening_prefix first; fallback to header/local extraction
       let pfx = '';
       try {
         const backendPfx = (data as any)?.opening_prefix;
