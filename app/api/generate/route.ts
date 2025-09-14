@@ -355,6 +355,35 @@ AirVo 外用舒缓，
         ],
       };
       const styleRulesBlock = JSON.stringify({ rules: STYLE_RULES[styleKey === 'random' ? 'story' : styleKey] || [] }, null, 2);
+      // Emoji sets by style, grouped in categories for diversity
+      const EMOJI_SETS: Record<'story'|'pain'|'daily'|'tech'|'promo', Record<string, string[]>> = {
+        story: {
+          emotion: ['😣','😵‍💫','😮‍💨','🙂','😌','🥹','😉','😃'],
+          nature: ['🌿','🍃','🌤️','🌙','🪴','🍋','🌊','✨','⭐️'],
+          daily: ['👜','🍽️','☕️','🏠','🛏️','📅','🚶‍♂️','🧭'],
+        },
+        pain: {
+          emotion: ['😣','🤧','🥵','🥶','😖','😫','😓'],
+          health: ['🫁','🫀','🧠','🦴','🤒','🩺'],
+          relief: ['😮‍💨','🙂','😌','🌿','🍃','✨'],
+        },
+        daily: {
+          routine: ['🌅','☀️','🌙','🛁','🛏️','🏠','👜','🚶‍♀️'],
+          nature: ['🌿','🍃','🌤️','🪴','🍋'],
+          emotion: ['🙂','😉','😌','😮‍💨'],
+        },
+        tech: {
+          tech: ['✨','⚙️','🧪','🔬','📈','🧠'],
+          speed: ['⏱️','⚡️','🚀','🎯'],
+          clean: ['🧼','💧','🌿'],
+        },
+        promo: {
+          promo: ['📣','🎁','💬','🛒','🏷️','💡'],
+          hype: ['🔥','⚡️','🚀','⭐️','✨'],
+          time: ['⏰','🗓️','⏳'],
+        },
+      };
+      const emojiSetsBlock = JSON.stringify(EMOJI_SETS[styleKey === 'random' ? 'story' : styleKey], null, 2);
       const openings = styleKey === 'random'
         ? OPENING_SCHEMA[(['story','pain','daily','tech','promo'])[Math.floor(Math.random()*5)] as 'story']
         : OPENING_SCHEMA[styleKey] || OPENING_SCHEMA['story'];
@@ -372,6 +401,8 @@ AirVo 外用舒缓，
         '',
         '<OPENING_SEEDS>', openingSeedBlock,
         '',
+        '<EMOJI_SETS>', emojiSetsBlock,
+        '',
         '<PLATFORM_PROFILE>', platformProfileBlock,
         '',
         '<KB>', kbBlock,
@@ -379,7 +410,8 @@ AirVo 外用舒缓，
         '<BAN_OPENING_PREFIXES>', JSON.stringify({ ban_opening_prefixes: Array.isArray(banPrefixes) ? banPrefixes : [] }, null, 2),
         '',
         '<OUTPUT_RULES>', OUTPUT_RULES,
-        '\n要求：第一句开头需从 <OPENING_SEEDS>.openings 任选其一进行自然改写（不要逐字复读）；同时符合 <OPENING_SCHEMA>。禁止与 <BAN_OPENING_PREFIXES> 中任一前缀相同或仅作轻微改写（同义替换/标点/emoji 变化也算相似）。如有冲突请换一种说法。开头要自然、有信息量，避免空泛。' + quickRules
+        '\n要求：第一句开头需从 <OPENING_SEEDS>.openings 任选其一进行自然改写（不要逐字复读）；同时符合 <OPENING_SCHEMA>。禁止与 <BAN_OPENING_PREFIXES> 中任一前缀相同或仅作轻微改写（同义替换/标点/emoji 变化也算相似）。如有冲突请换一种说法。开头要自然、有信息量，避免空泛。' +
+        '\nEmoji 多样性：从 <EMOJI_SETS> 的不同类别各取，避免重复；每段最多 1 个，总量按 <emoji_range>；不要一行堆两个。' + quickRules
       ].join('\n');
 
       const payload = {
@@ -527,9 +559,10 @@ AirVo 外用舒缓，
         ENABLE_SLA ? { timeoutMs: 1500, quick: true } : { quick: true }
       );
       if (!('error' in retryQuick) && !('timeout' in retryQuick)) {
+        const p64 = Buffer.from(retryQuick.openingPrefix || '', 'utf8').toString('base64');
         return new NextResponse(
           JSON.stringify({ captions: retryQuick.finalCaptions }),
-          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix': retryQuick.openingPrefix || '' } }
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix-B64': p64 } }
         );
       }
       // Ultimate local fallback (very short template from KB)
@@ -539,10 +572,13 @@ AirVo 外用舒缓，
       const p2 = pick(facts.功效) || pick(flatFacts);
       const tags = ['#10secHerbs', `#${productKey}`].concat([pick(flatFacts), pick(flatFacts)].filter(Boolean).slice(0,2)).slice(0,5).map(t=>`#${String(t).replace(/\s+/g,'')}`);
       const local = [p1, p2, '', tags.join(' ')].filter(Boolean).join('\n');
-      return new NextResponse(
-        JSON.stringify({ captions: [local] }),
-        { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix': extractOpeningPrefix(local) } }
-      );
+      {
+        const p64 = Buffer.from(extractOpeningPrefix(local) || '', 'utf8').toString('base64');
+        return new NextResponse(
+          JSON.stringify({ captions: [local] }),
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix-B64': p64 } }
+        );
+      }
     }
     const firstTooShort = !first.openingPrefix || first.openingPrefix.length < 4;
     if ((first.openingPrefix && isSimilarToAny(first.openingPrefix, banList, 0.8)) || firstTooShort) {
@@ -550,10 +586,13 @@ AirVo 外用舒缓，
       const second = await generateOnce(retrySchema.name, Math.random().toString(36).slice(2) + Date.now(), banList, styleKey, ENABLE_SLA ? { timeoutMs: 8000 } : undefined);
       if ('error' in second) {
         // fallback to first if retry failed upstream
-        return new NextResponse(
-          JSON.stringify({ captions: first.finalCaptions }),
-          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix': first.openingPrefix || '' } }
-        );
+        {
+          const p64 = Buffer.from(first.openingPrefix || '', 'utf8').toString('base64');
+          return new NextResponse(
+            JSON.stringify({ captions: first.finalCaptions }),
+            { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix-B64': p64 } }
+          );
+        }
       }
       if ('timeout' in second && second.timeout === true) {
         // quick fallback for retry branch as well
@@ -565,29 +604,39 @@ AirVo 外用舒缓，
           ENABLE_SLA ? { timeoutMs: 1500, quick: true } : { quick: true }
         );
         if (!('error' in quick) && !('timeout' in quick)) {
+          const p64 = Buffer.from(quick.openingPrefix || '', 'utf8').toString('base64');
           return new NextResponse(
             JSON.stringify({ captions: quick.finalCaptions }),
-            { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix': quick.openingPrefix || '' } }
+            { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix-B64': p64 } }
           );
         }
         const local2 = first.finalCaptions[0] || '';
-        return new NextResponse(
-          JSON.stringify({ captions: [local2] }),
-          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix': extractOpeningPrefix(local2) } }
-        );
+        {
+          const p64 = Buffer.from(extractOpeningPrefix(local2) || '', 'utf8').toString('base64');
+          return new NextResponse(
+            JSON.stringify({ captions: [local2] }),
+            { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix-B64': p64 } }
+          );
+        }
       }
       // if second still collides, return second anyway (已重试一次)
-      return new NextResponse(
-        JSON.stringify({ captions: second.finalCaptions }),
-        { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix': second.openingPrefix || '' } }
-      );
+      {
+        const p64 = Buffer.from(second.openingPrefix || '', 'utf8').toString('base64');
+        return new NextResponse(
+          JSON.stringify({ captions: second.finalCaptions }),
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix-B64': p64 } }
+        );
+      }
     }
 
     // first is fine
-    return new NextResponse(
-      JSON.stringify({ captions: first.finalCaptions }),
-      { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix': first.openingPrefix || '' } }
-    );
+    {
+      const p64 = Buffer.from(first.openingPrefix || '', 'utf8').toString('base64');
+      return new NextResponse(
+        JSON.stringify({ captions: first.finalCaptions }),
+        { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix-B64': p64 } }
+      );
+    }
   } catch (err: unknown) {
     return NextResponse.json(
       { error: 'Request failed', detail: (err as Error)?.message ?? String(err) },

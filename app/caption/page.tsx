@@ -165,11 +165,21 @@ export default function CaptionPage() {
       const data = await res.json();
       // Prefer opening prefix from response header when available
       try {
-        const pfxHeader = res.headers.get('X-Opening-Prefix');
-        if (pfxHeader) {
-          const next = [...lastPrefixesRef.current, String(pfxHeader).trim()].slice(-3);
-          lastPrefixesRef.current = next;
-          try { localStorage.setItem('caption:lastPrefixes', JSON.stringify(next)); } catch {}
+        const pfxHeaderB64 = res.headers.get('X-Opening-Prefix-B64');
+        if (pfxHeaderB64) {
+          try {
+            const decoded = atob(pfxHeaderB64);
+            const next = [...lastPrefixesRef.current, String(decoded).trim()].slice(-3);
+            lastPrefixesRef.current = next;
+            try { localStorage.setItem('caption:lastPrefixes', JSON.stringify(next)); } catch {}
+          } catch {}
+        } else {
+          const pfxHeader = res.headers.get('X-Opening-Prefix');
+          if (pfxHeader) {
+            const next = [...lastPrefixesRef.current, String(pfxHeader).trim()].slice(-3);
+            lastPrefixesRef.current = next;
+            try { localStorage.setItem('caption:lastPrefixes', JSON.stringify(next)); } catch {}
+          }
         }
       } catch {}
       // Defensive normalization: always produce string[] even if backend returns a JSON string
