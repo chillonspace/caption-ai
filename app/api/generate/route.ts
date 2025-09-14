@@ -227,6 +227,42 @@ AirVo 创新打破传统，#不用吃药打针，特别推荐肠胃敏感的人�
 -
 想知道这位大哥的血糖到底怎样降下来？👇
 #TriGuard #控糖生活 #饭后不困 #10secHerbs
+ 
+例4（故事 Story）
+前几天有位阿姨来做体检，
+医生说：血压又上去了，她整个人都慌了…
+-
+后来她开始每天按步骤用【TriGuard】，
+✅ 不是吞的，是外用抹一抹，更安心
+✅ 10秒透皮吸收，走微循环更快
+-
+“至少不会再被那种窒住的感觉吓到”，她笑说。
+#TriGuard #日常保养 #10secHerbs
+
+例5（痛点 Pain）
+#鼻塞的人懂的 半夜醒来第N次，只能用嘴吸气 🤧
+早上喉咙干到说不出话，整天没精神…
+-
+AirVo 外用舒缓，
+✅ 抹一抹，呼吸顺点
+✅ 清清凉凉，睡觉不再被卡住
+#AirVo #舒缓鼻塞 #10secHerbs
+
+例6（日常 Daily）
+早上出门前，胸口抹一下，像给自己打个小气。
+午后犯困，再抹一抹，整个人醒过来。
+晚上洗澡后，顺手抹，睡前呼吸更顺。
+#10secHerbs #轻松一点点
+
+例7（技术 Tech）
+✨ 德国+日本双技术：小分子，10秒透皮；不经肠胃，负担更小。
+用在胸口、颈侧这些微血管多的地方，吸收更快。
+#10secHerbs #技术加持 #不用吞
+
+例8（促销 Promo）
+🔥 想试的现在私讯，名额有限。
+这周下单有礼，别错过。
+#10secHerbs #PM我 #本周优惠
 `;
 
     const platformProfileBlockBase = JSON.stringify({
@@ -291,6 +327,34 @@ AirVo 创新打破传统，#不用吃药打针，特别推荐肠胃敏感的人�
       const openingBlock = JSON.stringify({ name: schema.name, tip: schema.tip }, null, 2);
       const platformProfileBlock = platformProfileBlockBase; // unchanged core profile
       const styleBlock = JSON.stringify({ type: styleKey }, null, 2);
+      const STYLE_RULES: Record<'story'|'pain'|'daily'|'tech'|'promo', string[]> = {
+        story: [
+          '第一人称/身边人故事，三段骨架：起因→转折→舒缓/改变',
+          '细节化描写（场景/动作/感受），不用“你是否/有没有”类问句',
+          '收尾自然口语+轻 CTA（PM我/私讯我）',
+        ],
+        pain: [
+          '先共鸣痛点（具体场景+感受），再说改善方向',
+          '句子短、力度强，避免形容词堆叠',
+          '收尾用“轻解决”语气，不承诺疗效',
+        ],
+        daily: [
+          '日常作息/场景化流程（早-中-晚/出门-回家）',
+          '口语自然，像给朋友的小建议',
+          '清单可选 1–2 条，简短有力',
+        ],
+        tech: [
+          '技术点只 1 句解释原理 + 1 句说明影响',
+          '避免堆砌专业词，保持通俗',
+          '强调“不进肠胃/小分子/10秒透皮”一类点到为止',
+        ],
+        promo: [
+          '突出稀缺/限时/赠品等，语气轻快，不强推',
+          '明确 CTA（PM我/私讯我/本周优惠）',
+          'Hashtags 贴近活动',
+        ],
+      };
+      const styleRulesBlock = JSON.stringify({ rules: STYLE_RULES[styleKey === 'random' ? 'story' : styleKey] || [] }, null, 2);
       const openings = styleKey === 'random'
         ? OPENING_SCHEMA[(['story','pain','daily','tech','promo'])[Math.floor(Math.random()*5)] as 'story']
         : OPENING_SCHEMA[styleKey] || OPENING_SCHEMA['story'];
@@ -303,6 +367,8 @@ AirVo 创新打破传统，#不用吃药打针，特别推荐肠胃敏感的人�
         '<OPENING_SCHEMA>', openingBlock,
         '',
         '<STYLE>', styleBlock,
+        '',
+        '<STYLE_RULES>', styleRulesBlock,
         '',
         '<OPENING_SEEDS>', openingSeedBlock,
         '',

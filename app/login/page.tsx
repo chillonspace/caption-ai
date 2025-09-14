@@ -15,6 +15,15 @@ export default function LoginPage() {
     e.preventDefault();
     setErr(null);
     setLoading(true);
+    // Admin portal shortcut: if password equals special admin portal password, go admin page
+    try {
+      const adminPortalPassword = process.env.NEXT_PUBLIC_ADMIN_PORTAL_PASSWORD;
+      if (adminPortalPassword && pw === adminPortalPassword) {
+        setLoading(false);
+        location.href = '/admin/billing';
+        return;
+      }
+    } catch {}
     try {
       const { data: { user }, error: authErr } = await sb.auth.signInWithPassword({ email, password: pw });
       if (authErr) {
