@@ -140,8 +140,6 @@ body {
 .btn-dark{ background:#111827; color:#fff; border:none; }
 .btn-dark:hover{ transform: translateY(-1px); }
 
-/* Legacy topbar styles - remove if not used elsewhere */
-.topbar{ display: none !important; }
 
 /* 强制确保顶部区域没有黑色背景 */
 html, body, #__next, [data-nextjs-scroll-focus-boundary] {
@@ -187,11 +185,6 @@ html, body, #__next, [data-nextjs-scroll-focus-boundary] {
   background: var(--bg-card);
   border: 1px solid var(--border);
   box-shadow: 0 10px 24px rgba(2,6,23,.08), inset 0 1px 0 rgba(255,255,255,.6);
-  color: var(--text);
-}
-.nav-title{
-  flex: 1; text-align: center;
-  font-weight: 700; font-size: 13px; letter-spacing:.2px; 
   color: var(--text);
 }
 /* 右侧汉堡按钮造型 */

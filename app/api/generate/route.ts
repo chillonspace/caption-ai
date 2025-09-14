@@ -1,10 +1,53 @@
 import { NextRequest, NextResponse } from 'next/server';
 import kbJson from '@/lib/kb/10secherbs_kb.json';
+import { STYLE_OPTIONS_ZH } from '@/lib/constants';
+import { createServer } from '@/lib/supabase/server';
+import fs from 'fs';
+import path from 'path';
+
 export const dynamic = 'force-dynamic';
+
+// 记录用户使用次数
+async function recordUsage(email: string) {
+  try {
+    const usageFile = path.join(process.cwd(), 'data', 'usage-stats.json');
+    
+    // 确保目录存在
+    const dataDir = path.dirname(usageFile);
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    
+    // 读取现有统计
+    let stats: Record<string, number> = {};
+    if (fs.existsSync(usageFile)) {
+      stats = JSON.parse(fs.readFileSync(usageFile, 'utf8'));
+    }
+    
+    // 增加使用次数
+    stats[email] = (stats[email] || 0) + 1;
+    
+    // 保存统计
+    fs.writeFileSync(usageFile, JSON.stringify(stats, null, 2));
+  } catch (error) {
+    console.error('Failed to record usage:', error);
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const { product, tone, platform, ban_opening_prefixes, style } = await req.json();
+    // 验证用户登录状态
+    const sb = createServer();
+    const { data: { user } } = await sb.auth.getUser();
+    
+    if (!user?.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    
+    // 记录使用次数
+    await recordUsage(user.email);
+    
+    const { product, platform, ban_opening_prefixes, style, ban_recent_styles } = await req.json();
 
     // --- Minimal KB wiring & platform profiles (inline; no new files) ---
     const KB: any = kbJson as any;
@@ -42,32 +85,81 @@ export async function POST(req: NextRequest) {
       };
       return map[raw] || 'random';
     }
+    
+    // Smart random style selection avoiding recent styles
+    function pickRandomStyle(banRecentStyles: string[] = []): 'story' | 'pain' | 'daily' | 'tech' | 'promo' {
+      const allStyles: ('story' | 'pain' | 'daily' | 'tech' | 'promo')[] = ['story', 'pain', 'daily', 'tech', 'promo'];
+      const bannedNormalized = banRecentStyles.map(s => normalizeStyle(s)).filter(s => s !== 'random');
+      const available = allStyles.filter(s => !bannedNormalized.includes(s));
+      
+      // If all styles are banned (unlikely), reset and allow all
+      if (available.length === 0) {
+        return allStyles[Math.floor(Math.random() * allStyles.length)];
+      }
+      
+      return available[Math.floor(Math.random() * available.length)];
+    }
 
     const OPENING_SCHEMA: Record<'story'|'pain'|'daily'|'tech'|'promo', string[]> = {
       story: [
         '今天这位大哥来我们这里…',
         '前几天一个客户做体检…',
         '测出数据有点吓人…',
+        '上星期有个阿姨过来咨询…',
+        '遇到一位常客，他说…',
+        '昨天一位朋友跟我分享…',
+        '刚才有人问我关于…',
+        '听说有个用户试了之后…',
+        '记得那次有位大叔…',
+        '最近碰到好几个人都在问…',
       ],
       pain: [
         '#鼻塞的苦日子…',
         '饭后一阵困，眼皮抬不起来…',
         '久坐到腰酸背痛…',
+        '半夜又被憋醒了…',
+        '每天早上起来就开始不舒服…',
+        '这种感觉真的很无奈…',
+        '又是一个睡不好的夜晚…',
+        '看到镜子里憔悴的自己…',
+        '身体不舒服的时候最明白…',
+        '那种有气无力的感觉…',
       ],
       daily: [
         '🌿每天一抹，就像给身体一个温柔的拥抱',
         '早上起来抹一抹，整天轻松点',
         '下班回家先抹一下，放松',
+        '睡前的小仪式，抹一抹安心入睡',
+        '忙碌一天后，给自己一点呵护',
+        '随身带着，需要的时候就用',
+        '简单的日常，却带来大改变',
+        '每天几分钟，为健康投资',
+        '生活小确幸，从涂抹开始',
+        '日常护理变得这么简单',
       ],
       tech: [
         '✨ 外用小分子，10秒透皮吸收',
         '德国+日本双技术加持，不经肠胃',
         '轻轻一抹，走微循环',
+        '🔬 透皮技术的革新突破',
+        '小分子渗透，科技改变生活',
+        '外用吸收，绕过肠胃负担',
+        '创新配方，传统智慧遇见现代科技',
+        '精准渗透，直达需要的地方',
+        '技术背后的健康理念',
+        '科学配比，每一滴都有意义',
       ],
       promo: [
         '⚡名额有限，想试的现在私讯',
         '📣 本周下单有礼，别错过',
         '🔥 很多人在用，你也可以试试',
+        '💥 限时优惠，机会难得',
+        '🎁 特别推广，现在最划算',
+        '⏰ 今天最后一天，抓紧时间',
+        '🛒 库存不多，喜欢的赶快',
+        '💌 私讯我了解详情',
+        '🏆 口碑推荐，值得信赖',
+        '💯 用过的都说好',
       ],
     };
 
@@ -137,7 +229,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing DEEPSEEK_API_KEY' }, { status: 500 });
     }
 
-    if (!product || !tone) {
+    if (!product) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
@@ -151,11 +243,12 @@ export async function POST(req: NextRequest) {
 你是马来西亚本地风格的中文社媒文案写手（不是品牌官号），写给朋友看的口吻。
 输出的文案必须自然、口语化，像真人日常发帖。
 中文为主，可少量 EN/BM 点缀（≤10%），自然嵌入即可。
-用短句，空行分段，每句只表达一个意思；可用 ✅ ✨ — 等符号增强可读性。
+用短句，空行分段，每句只表达一个意思；可用多样化清单符号增强可读性（如：✅ ✨ — 💡 🎯 📍 ⭐ 🌟 💎 🔥 等，避免重复使用相同符号）。
 必须基于 <KB> 提供的事实写作，不得发明成分/功效/数据。
 技术点低调自然表达（如：小分子/道尔顿/10秒透皮/不进肠胃/KKM），只点到为止，不要堆砌。
 禁止医疗承诺或诊断词（如 治愈/奇迹/保证/100% 有效）。
-禁止使用模板化开头：例如 “最近/这阵子/有时候/常常/每次/每天/近来/Eh/Hari-hari”等；如出现请改写。
+禁止使用模板化开头：例如 "最近/这阵子/有时候/常常/每次/每天/近来/Eh/Hari-hari"等；如出现请改写。
+避免重复句式与连接词，多样化表达：用"然后/接着/于是/结果/所以/因此/不过/但是/而且/另外"等不同连接；变化"感觉/觉得/发现/体验/尝试"等动词。
 只输出最终文案正文（纯文本），不要解释，不要代码块。
 
 [STYLE_EXAMPLES]
@@ -277,9 +370,9 @@ AirVo 外用舒缓，
       '中段：从 <KB.facts> 中选 2–4 个点写成生活化句子；优先体验/功效，其次人群/使用；技术点轻描淡写。',
       '清单：可选 2–3 条，用 ✅/✨/— 表达，简短有力；不是每篇都必须有。',
       'Emoji：按 <emoji_range> 使用，分散在不同段落；不要一行堆两个。',
-      'Hashtags：必需；数量在 <hashtag_range> 内，置于文末一段；结合产品名/功效/场景/品牌。',
+      'Hashtags：必需；数量在 <hashtag_range> 内，置于文末一段；打乱顺序避免固定模式，结合产品名/功效/场景/品牌。',
       'CTA：按平台习惯收尾（FB=PM我/私讯我；小红书=留言+收藏；IG=点链接；TikTok=评论/私信）。',
-      '多样性：根据 variation_level 调整语气与开头；即使同变量多次生成，也要有不同感觉。',
+      '多样性：根据 variation_level 调整语气与开头；即使同变量多次生成，也要有不同感觉；句式、连接词、表达角度都需变化。',
       '输出：只给最终文案正文（纯文本）。'
     ].join('\n');
     // Simple similarity utilities for opening prefix (char-level 3-gram Jaccard)
@@ -303,7 +396,7 @@ AirVo 外用舒缓，
       const union = A.size + B.size - inter || 1;
       return inter / union;
     }
-    function isSimilarToAny(prefix: string, banned: string[], threshold = 0.8): boolean {
+    function isSimilarToAny(prefix: string, banned: string[], threshold = 0.65): boolean {
       if (!prefix) return false;
       for (const b of banned) {
         if (!b) continue;
@@ -358,29 +451,29 @@ AirVo 外用舒缓，
       // Emoji sets by style, grouped in categories for diversity
       const EMOJI_SETS: Record<'story'|'pain'|'daily'|'tech'|'promo', Record<string, string[]>> = {
         story: {
-          emotion: ['😣','😵‍💫','😮‍💨','🙂','😌','🥹','😉','😃'],
-          nature: ['🌿','🍃','🌤️','🌙','🪴','🍋','🌊','✨','⭐️'],
-          daily: ['👜','🍽️','☕️','🏠','🛏️','📅','🚶‍♂️','🧭'],
+          emotion: ['😣','😵‍💫','😮‍💨','🙂','😌','🥹','😉','😃','😊','🥰','😋','😎','🤗','😇','🥺','😍','🤩','😘','🙃','😄'],
+          nature: ['🌿','🍃','🌤️','🌙','🪴','🍋','🌊','✨','⭐️','🌸','🌺','🌻','🌞','🌱','🍀','🌾','🌈','☘️','🌝','🌼','🌷'],
+          daily: ['👜','🍽️','☕️','🏠','🛏️','📅','🚶‍♂️','🧭','🎒','🥤','🍵','🏃‍♀️','📖','🕐','👩‍💻','🧘‍♀️','🚗','🚌','📱','🎧'],
         },
         pain: {
-          emotion: ['😣','🤧','🥵','🥶','😖','😫','😓'],
-          health: ['🫁','🫀','🧠','🦴','🤒','🩺'],
-          relief: ['😮‍💨','🙂','😌','🌿','🍃','✨'],
+          emotion: ['😣','🤧','🥵','🥶','😖','😫','😓','😰','😨','😢','🥴','😵','🤕','😪','🙄','😤','😮‍💨','😩'],
+          health: ['🫁','🫀','🧠','🦴','🤒','🩺','💊','🏥','⚕️','🩹','🌡️','💉','🧑‍⚕️','👩‍⚕️','🚑','🔬'],
+          relief: ['😮‍💨','🙂','😌','🌿','🍃','✨','😊','🥰','😇','🌱','💚','🤲','🙏','💆‍♀️','🛀','🧘‍♂️'],
         },
         daily: {
-          routine: ['🌅','☀️','🌙','🛁','🛏️','🏠','👜','🚶‍♀️'],
-          nature: ['🌿','🍃','🌤️','🪴','🍋'],
-          emotion: ['🙂','😉','😌','😮‍💨'],
+          routine: ['🌅','☀️','🌙','🛁','🛏️','🏠','👜','🚶‍♀️','🌄','🌇','🌃','⏰','🕐','🕕','🕘','🚿','🧴','🪥','👔','👗','🧥'],
+          nature: ['🌿','🍃','🌤️','🪴','🍋','🌱','🌾','🌸','🌺','🌻','🌞','🍀','☘️','🌈','🌝','🌼','🌷','🌲'],
+          emotion: ['🙂','😉','😌','😮‍💨','😊','🥰','😋','😇','🤗','☺️','😄','🙃','😍','😘','🥺'],
         },
         tech: {
-          tech: ['✨','⚙️','🧪','🔬','📈','🧠'],
-          speed: ['⏱️','⚡️','🚀','🎯'],
-          clean: ['🧼','💧','🌿'],
+          tech: ['✨','⚙️','🧪','🔬','📈','🧠','💻','📱','🖥️','⌚️','🔧','🔩','💡','🛠️','📊','📉','💾','🔌','🎛️','📡'],
+          speed: ['⏱️','⚡️','🚀','🎯','💨','🏃‍♂️','🏎️','✈️','🚁','⚙️','🔥','💫','⭐️','🌟'],
+          clean: ['🧼','💧','🌿','🧽','🚿','💎','❄️','💙','🤍','✨','🌊','💠','🔷'],
         },
         promo: {
-          promo: ['📣','🎁','💬','🛒','🏷️','💡'],
-          hype: ['🔥','⚡️','🚀','⭐️','✨'],
-          time: ['⏰','🗓️','⏳'],
+          promo: ['📣','🎁','💬','🛒','🏷️','💡','📢','🎉','🎊','🛍️','💳','💰','🏆','🎖️','🏅','🎪','📦','🛫','💌'],
+          hype: ['🔥','⚡️','🚀','⭐️','✨','💥','💯','🌟','🎆','🎇','🔆','💫','⚡','🌠','💥','🎯','🚨'],
+          time: ['⏰','🗓️','⏳','⏱️','🕐','📅','⌛','🔔','📆','🚨','⚠️','🏃‍♂️','💨'],
         },
       };
       const emojiSetsBlock = JSON.stringify(EMOJI_SETS[styleKey === 'random' ? 'story' : styleKey], null, 2);
@@ -391,6 +484,11 @@ AirVo 外用舒缓，
       const quickRules = options?.quick
         ? '\n[QUICK]\n输出为120–180字，≤2条清单（可选），必须包含 hashtags；保持口语自然。'
         : '';
+      // 随机清单符号池
+      const LIST_SYMBOLS = ['✅', '✨', '—', '💡', '🎯', '📍', '⭐', '🌟', '💎', '🔥', '🌿', '💫', '🎪', '🚀', '⚡', '💯'];
+      const shuffledSymbols = LIST_SYMBOLS.sort(() => Math.random() - 0.5).slice(0, 5);
+      const symbolsBlock = JSON.stringify({ list_symbols: shuffledSymbols }, null, 2);
+      
       const userPrompt = [
         `variation_token: ${variationToken}`,
         '<OPENING_SCHEMA>', openingBlock,
@@ -403,6 +501,8 @@ AirVo 外用舒缓，
         '',
         '<EMOJI_SETS>', emojiSetsBlock,
         '',
+        '<LIST_SYMBOLS>', symbolsBlock,
+        '',
         '<PLATFORM_PROFILE>', platformProfileBlock,
         '',
         '<KB>', kbBlock,
@@ -411,7 +511,8 @@ AirVo 外用舒缓，
         '',
         '<OUTPUT_RULES>', OUTPUT_RULES,
         '\n要求：第一句开头需从 <OPENING_SEEDS>.openings 任选其一进行自然改写（不要逐字复读）；同时符合 <OPENING_SCHEMA>。禁止与 <BAN_OPENING_PREFIXES> 中任一前缀相同或仅作轻微改写（同义替换/标点/emoji 变化也算相似）。如有冲突请换一种说法。开头要自然、有信息量，避免空泛。' +
-        '\nEmoji 多样性：从 <EMOJI_SETS> 的不同类别各取，避免重复；每段最多 1 个，总量按 <emoji_range>；不要一行堆两个。' + quickRules
+        '\nEmoji 多样性：从 <EMOJI_SETS> 的不同类别各取，避免重复；每段最多 1 个，总量按 <emoji_range>；不要一行堆两个。' +
+        '\n清单符号多样性：如需使用清单，请从 <LIST_SYMBOLS> 中随机选择不同符号，避免全部使用相同符号。' + quickRules
       ].join('\n');
 
       const payload = {
@@ -533,11 +634,21 @@ AirVo 外用舒缓，
     }
 
     const banList: string[] = Array.isArray(ban_opening_prefixes)
-      ? (ban_opening_prefixes as unknown[]).map(v => String(v || '')).filter(Boolean).slice(-3)
+      ? (ban_opening_prefixes as unknown[]).map(v => String(v || '')).filter(Boolean).slice(-7)
       : [];
 
+    // Determine actual style to use (with smart random selection)
+    const inputStyleKey = normalizeStyle(style);
+    const banRecentStylesList: string[] = Array.isArray(ban_recent_styles) 
+      ? (ban_recent_styles as unknown[]).map(v => String(v || '')).filter(Boolean)
+      : [];
+    
+    const actualStyleKey = inputStyleKey === 'random' 
+      ? pickRandomStyle(banRecentStylesList)
+      : inputStyleKey;
+    
     // Attempt up to 2 times: initial + one retry with different schema if opening collides
-    const styleKey = normalizeStyle(style);
+    const styleKey = actualStyleKey;
     const firstSchema = pickSchema();
     const first = await generateOnce(
       firstSchema.name,
@@ -560,9 +671,11 @@ AirVo 外用舒缓，
       );
       if (!('error' in retryQuick) && !('timeout' in retryQuick)) {
         const p64 = Buffer.from(retryQuick.openingPrefix || '', 'utf8').toString('base64');
+        const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
+        const usedStyleChinese = styleMapping[styleKey] || styleKey;
         return new NextResponse(
-          JSON.stringify({ captions: retryQuick.finalCaptions }),
-          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix-B64': p64 } }
+          JSON.stringify({ captions: retryQuick.finalCaptions, used_style: usedStyleChinese }),
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': usedStyleChinese, 'X-Used-Style': usedStyleChinese, 'X-Opening-Prefix-B64': p64 } }
         );
       }
       // Ultimate local fallback (very short template from KB)
@@ -574,24 +687,28 @@ AirVo 外用舒缓，
       const local = [p1, p2, '', tags.join(' ')].filter(Boolean).join('\n');
       {
         const p64 = Buffer.from(extractOpeningPrefix(local) || '', 'utf8').toString('base64');
+        const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
+        const usedStyleChinese = styleMapping[styleKey] || styleKey;
         return new NextResponse(
-          JSON.stringify({ captions: [local] }),
-          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix-B64': p64 } }
+          JSON.stringify({ captions: [local], used_style: usedStyleChinese }),
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': usedStyleChinese, 'X-Used-Style': usedStyleChinese, 'X-Opening-Prefix-B64': p64 } }
         );
       }
     }
-    const firstTooShort = !first.openingPrefix || first.openingPrefix.length < 4;
-    if ((first.openingPrefix && isSimilarToAny(first.openingPrefix, banList, 0.8)) || firstTooShort) {
+    const firstTooShort = !first.openingPrefix || first.openingPrefix.length < 5;
+    if ((first.openingPrefix && isSimilarToAny(first.openingPrefix, banList, 0.65)) || firstTooShort) {
       const retrySchema = pickSchema(first.schemaUsed);
       const second = await generateOnce(retrySchema.name, Math.random().toString(36).slice(2) + Date.now(), banList, styleKey, ENABLE_SLA ? { timeoutMs: 8000 } : undefined);
       if ('error' in second) {
         // fallback to first if retry failed upstream
         {
           const p64 = Buffer.from(first.openingPrefix || '', 'utf8').toString('base64');
-          return new NextResponse(
-            JSON.stringify({ captions: first.finalCaptions }),
-            { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix-B64': p64 } }
-          );
+        const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
+        const usedStyleChinese = styleMapping[styleKey] || styleKey;
+        return new NextResponse(
+          JSON.stringify({ captions: first.finalCaptions, used_style: usedStyleChinese }),
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': usedStyleChinese, 'X-Used-Style': usedStyleChinese, 'X-Opening-Prefix-B64': p64 } }
+        );
         }
       }
       if ('timeout' in second && second.timeout === true) {
@@ -605,26 +722,32 @@ AirVo 外用舒缓，
         );
         if (!('error' in quick) && !('timeout' in quick)) {
           const p64 = Buffer.from(quick.openingPrefix || '', 'utf8').toString('base64');
+          const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
+          const usedStyleChinese = styleMapping[styleKey] || styleKey;
           return new NextResponse(
-            JSON.stringify({ captions: quick.finalCaptions }),
-            { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix-B64': p64 } }
+            JSON.stringify({ captions: quick.finalCaptions, used_style: usedStyleChinese }),
+            { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': usedStyleChinese, 'X-Used-Style': usedStyleChinese, 'X-Opening-Prefix-B64': p64 } }
           );
         }
         const local2 = first.finalCaptions[0] || '';
         {
           const p64 = Buffer.from(extractOpeningPrefix(local2) || '', 'utf8').toString('base64');
+          const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
+          const usedStyleChinese = styleMapping[styleKey] || styleKey;
           return new NextResponse(
-            JSON.stringify({ captions: [local2] }),
-            { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix-B64': p64 } }
+            JSON.stringify({ captions: [local2], used_style: usedStyleChinese }),
+            { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': usedStyleChinese, 'X-Used-Style': usedStyleChinese, 'X-Opening-Prefix-B64': p64 } }
           );
         }
       }
       // if second still collides, return second anyway (已重试一次)
       {
         const p64 = Buffer.from(second.openingPrefix || '', 'utf8').toString('base64');
+        const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
+        const usedStyleChinese = styleMapping[styleKey] || styleKey;
         return new NextResponse(
-          JSON.stringify({ captions: second.finalCaptions }),
-          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix-B64': p64 } }
+          JSON.stringify({ captions: second.finalCaptions, used_style: usedStyleChinese }),
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': usedStyleChinese, 'X-Used-Style': usedStyleChinese, 'X-Opening-Prefix-B64': p64 } }
         );
       }
     }
@@ -632,9 +755,18 @@ AirVo 外用舒缓，
     // first is fine
     {
       const p64 = Buffer.from(first.openingPrefix || '', 'utf8').toString('base64');
+      const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
+      const usedStyleChinese = styleMapping[styleKey] || styleKey;
+      
       return new NextResponse(
-        JSON.stringify({ captions: first.finalCaptions }),
-        { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': styleKey, 'X-Opening-Prefix-B64': p64 } }
+        JSON.stringify({ captions: first.finalCaptions, used_style: usedStyleChinese }),
+        { status: 200, headers: { 
+          'Content-Type': 'application/json', 
+          'Cache-Control': 'no-store, max-age=0', 
+          'X-Style-Used': usedStyleChinese, 
+          'X-Used-Style': usedStyleChinese,
+          'X-Opening-Prefix-B64': p64 
+        } }
       );
     }
   } catch (err: unknown) {

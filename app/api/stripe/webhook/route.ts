@@ -1,15 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { getEnv, setUserActiveByEmail } from '@/lib/admin-utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-function getEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env: ${name}`);
-  return v;
-}
 
 async function getEmailFromStripe(stripe: Stripe, event: Stripe.Event): Promise<string | null> {
   try {
@@ -45,25 +39,6 @@ async function getEmailFromStripe(stripe: Stripe, event: Stripe.Event): Promise<
   } catch {
     return null;
   }
-}
-
-async function setUserActiveByEmail(email: string, active: boolean) {
-  const url = getEnv('NEXT_PUBLIC_SUPABASE_URL');
-  const serviceKey = getEnv('SUPABASE_SERVICE_ROLE_KEY');
-  const admin = createSupabaseClient(url, serviceKey);
-
-  // 1) find user by email via Auth Admin API (no need to expose auth schema)
-  const { data: list, error: listErr } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-  if (listErr) return { ok: false, reason: 'list_failed' } as const;
-  const target = (list?.users || []).find(u => (u.email || '').toLowerCase() === email.toLowerCase());
-  if (!target?.id) return { ok: false, reason: 'user_not_found' } as const;
-
-  // 2) update app_metadata.active via Auth Admin API
-  const { error: updErr } = await admin.auth.admin.updateUserById(target.id, {
-    app_metadata: { active },
-  });
-  if (updErr) return { ok: false, reason: 'update_failed' } as const;
-  return { ok: true } as const;
 }
 
 export async function POST(req: NextRequest) {

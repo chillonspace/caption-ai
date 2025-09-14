@@ -11,7 +11,6 @@ const PLATFORMS = ['Facebook'];
 export default function CaptionPage() {
   const sb = createClient();
   const [product, setProduct] = useState('');
-  const [tone, setTone] = useState('');
   const [platform, setPlatform] = useState('Facebook');
   const [styleZh, setStyleZh] = useState<string>('随机');
   const [loading, setLoading] = useState(false);
@@ -23,6 +22,8 @@ export default function CaptionPage() {
   const [userEmail, setUserEmail] = useState<string>('');
   // Keep last 3 opening prefixes to avoid repetitive openings across runs
   const lastPrefixesRef = useRef<string[]>([]);
+  // Keep last 2-3 styles to avoid repetitive styles in random mode
+  const lastStylesRef = useRef<string[]>([]);
 
   function extractOpeningPrefix(text: string): string {
     try {
@@ -98,7 +99,6 @@ export default function CaptionPage() {
       const saved = JSON.parse(localStorage.getItem('caption:prefs') || 'null');
       if (saved) {
         if (saved.product) setProduct(saved.product);
-        if (saved.tone) setTone(saved.tone);
         if (saved.platform) setPlatform(saved.platform);
         if (saved.styleZh) setStyleZh(saved.styleZh);
       }
@@ -107,16 +107,24 @@ export default function CaptionPage() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('caption:prefs', JSON.stringify({ product, tone, platform, styleZh }));
+      localStorage.setItem('caption:prefs', JSON.stringify({ product, platform, styleZh }));
     } catch {}
-  }, [product, tone, platform, styleZh]);
+  }, [product, platform, styleZh]);
 
   // Load last 3 opening prefixes from localStorage on mount
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('caption:lastPrefixes') || 'null');
       if (Array.isArray(saved)) {
-        lastPrefixesRef.current = saved.slice(-3).map((v)=>String(v||'')).filter(Boolean);
+        lastPrefixesRef.current = saved.slice(-7).map((v)=>String(v||'')).filter(Boolean);
+      }
+    } catch {}
+    
+    // Load last styles for random mode diversity
+    try {
+      const savedStyles = JSON.parse(localStorage.getItem('caption:lastStyles') || 'null');
+      if (Array.isArray(savedStyles)) {
+        lastStylesRef.current = savedStyles.slice(-2).map((v)=>String(v||'')).filter(Boolean);
       }
     } catch {}
   }, []);
@@ -142,7 +150,7 @@ export default function CaptionPage() {
   }
 
   async function handleGenerate() {
-    if (!product || !tone) return;
+    if (!product) return;
     setLoading(true);
     setCaptions([]);
     setIdx(0);
@@ -154,29 +162,39 @@ export default function CaptionPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           product,
-          tone,
           platform,
           style: styleZh,
-          ban_opening_prefixes: lastPrefixesRef.current.slice(-3),
+          ban_opening_prefixes: lastPrefixesRef.current.slice(-7),
+          ban_recent_styles: styleZh === '随机' ? lastStylesRef.current.slice(-2) : [],
         }),
       });
 
       if (!res.ok) throw new Error('Bad response');
       const data = await res.json();
+      
+      // 如果是随机模式，记录实际使用的风格
+      if (styleZh === '随机') {
+        const usedStyle = res.headers.get('X-Used-Style') || data.used_style;
+        if (usedStyle) {
+          const nextStyles = [...lastStylesRef.current, usedStyle].slice(-2);
+          lastStylesRef.current = nextStyles;
+          try { localStorage.setItem('caption:lastStyles', JSON.stringify(nextStyles)); } catch {}
+        }
+      }
       // Prefer opening prefix from response header when available
       try {
         const pfxHeaderB64 = res.headers.get('X-Opening-Prefix-B64');
         if (pfxHeaderB64) {
           try {
             const decoded = atob(pfxHeaderB64);
-            const next = [...lastPrefixesRef.current, String(decoded).trim()].slice(-3);
+            const next = [...lastPrefixesRef.current, String(decoded).trim()].slice(-7);
             lastPrefixesRef.current = next;
             try { localStorage.setItem('caption:lastPrefixes', JSON.stringify(next)); } catch {}
           } catch {}
         } else {
           const pfxHeader = res.headers.get('X-Opening-Prefix');
           if (pfxHeader) {
-            const next = [...lastPrefixesRef.current, String(pfxHeader).trim()].slice(-3);
+            const next = [...lastPrefixesRef.current, String(pfxHeader).trim()].slice(-7);
             lastPrefixesRef.current = next;
             try { localStorage.setItem('caption:lastPrefixes', JSON.stringify(next)); } catch {}
           }
@@ -274,7 +292,7 @@ export default function CaptionPage() {
         pfx = extractOpeningPrefix(result[0]);
       }
       if (pfx) {
-        const next = [...lastPrefixesRef.current, pfx].slice(-3);
+        const next = [...lastPrefixesRef.current, pfx].slice(-7);
         lastPrefixesRef.current = next;
         try { localStorage.setItem('caption:lastPrefixes', JSON.stringify(next)); } catch {}
       }
@@ -399,7 +417,7 @@ export default function CaptionPage() {
               whileTap={{ scale: 0.98 }}
               whileHover={{ y: loading ? 0 : -2 }}
               onClick={handleGenerate}
-              disabled={!product || !tone || loading}
+              disabled={!product || loading}
             >
               {loading ? '生成中…' : '生成文案'}
             </motion.button>

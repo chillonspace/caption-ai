@@ -7,6 +7,7 @@ export default function AdminBillingPage() {
   const [status, setStatus] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState<any[]>([]);
+  const [usageStats, setUsageStats] = useState<Record<string, number>>({});
 
   // bootstrap token from public admin password (single-password mode)
   useEffect(() => {
@@ -53,12 +54,10 @@ export default function AdminBillingPage() {
 
   const formatDateTime = (dateStr: string) => {
     if (!dateStr) return '-';
-    return new Date(dateStr).toLocaleString('zh-CN', {
-      year: 'numeric',
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('zh-CN', {
       month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
+      day: '2-digit'
     });
   };
 
@@ -70,17 +69,17 @@ export default function AdminBillingPage() {
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
     
     if (diffDays === 0) {
-      return '今天 ' + lastSignIn.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+      return '今天';
     } else if (diffDays === 1) {
-      return '昨天 ' + lastSignIn.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+      return '昨天';
     } else if (diffDays < 7) {
       return `${diffDays}天前`;
+    } else if (diffDays < 30) {
+      return `${Math.floor(diffDays / 7)}周前`;
     } else {
-      return lastSignIn.toLocaleString('zh-CN', {
+      return lastSignIn.toLocaleDateString('zh-CN', {
         month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit'
+        day: '2-digit'
       });
     }
   };
@@ -88,15 +87,15 @@ export default function AdminBillingPage() {
   const getStatusBadge = (active: boolean) => (
     <span 
       style={{
-        padding: '4px 8px',
-        borderRadius: '6px',
-        fontSize: '12px',
+        padding: '2px 6px',
+        borderRadius: '4px',
+        fontSize: '11px',
         fontWeight: '500',
         background: active ? '#DCFCE7' : '#FEF2F2',
         color: active ? '#166534' : '#DC2626'
       }}
     >
-      {active ? '已激活' : '未激活'}
+      {active ? '激活' : '禁用'}
     </span>
   );
 
@@ -106,15 +105,15 @@ export default function AdminBillingPage() {
     return (
       <span 
         style={{
-          padding: '4px 8px',
-          borderRadius: '6px',
-          fontSize: '12px',
+          padding: '2px 6px',
+          borderRadius: '4px',
+          fontSize: '11px',
           fontWeight: '500',
           background: isActive ? '#DBEAFE' : '#F3F4F6',
           color: isActive ? '#1D4ED8' : '#6B7280'
         }}
       >
-        {status}
+        {isActive ? '付费' : status}
       </span>
     );
   };
@@ -125,7 +124,7 @@ export default function AdminBillingPage() {
       background: 'var(--bg-page)',
       padding: '24px 16px'
     }}>
-      <div className="container-narrow">
+      <div style={{ width: '100%', maxWidth: '1200px', margin: '0 auto' }}>
         {/* Header */}
         <div className="header-center" style={{ marginBottom: '32px' }}>
           <h1 className="title">Admin · 用户计费管理</h1>
@@ -186,18 +185,28 @@ export default function AdminBillingPage() {
                 disabled={loading}
                 onClick={async () => {
                   setLoading(true);
-                  try {
-                    const res = await fetch('/api/admin/users-list?include_stripe=1', {
-                      headers: { 'x-admin-token': token || '' },
-                    });
-                    const json = await res.json();
-                    if (!res.ok) throw new Error(json?.error || 'Request failed');
-                    setUsers(json.users || []);
-                  } catch (e: any) {
-                    setStatus(`Error: ${e.message}`);
-                  } finally {
-                    setLoading(false);
-                  }
+              try {
+                // 获取用户列表
+                const res = await fetch('/api/admin/users-list?include_stripe=1', {
+                  headers: { 'x-admin-token': token || '' },
+                });
+                const json = await res.json();
+                if (!res.ok) throw new Error(json?.error || 'Request failed');
+                setUsers(json.users || []);
+                
+                // 获取使用统计
+                const statsRes = await fetch('/api/admin/usage-stats', {
+                  headers: { 'x-admin-token': token || '' },
+                });
+                const statsJson = await statsRes.json();
+                if (statsRes.ok) {
+                  setUsageStats(statsJson.stats || {});
+                }
+              } catch (e: any) {
+                setStatus(`Error: ${e.message}`);
+              } finally {
+                setLoading(false);
+              }
                 }}
               >
                 {loading ? '加载中...' : '列出所有用户'}
@@ -263,81 +272,97 @@ export default function AdminBillingPage() {
             </div>
             
             <div style={{ 
-              overflowX: 'auto',
               border: '1px solid var(--border)',
               borderRadius: '12px'
             }}>
               <table style={{ 
                 width: '100%', 
                 borderCollapse: 'collapse',
-                background: 'white'
+                background: 'white',
+                fontSize: '13px'
               }}>
                 <thead>
                   <tr style={{ background: 'var(--bg-soft)' }}>
                     <th style={{ 
                       textAlign: 'left', 
-                      padding: '16px 12px',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      color: 'var(--text)',
-                      borderBottom: '1px solid var(--border)'
-                    }}>邮箱</th>
-                    <th style={{ 
-                      textAlign: 'left', 
-                      padding: '16px 12px',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      color: 'var(--text)',
-                      borderBottom: '1px solid var(--border)'
-                    }}>手机</th>
-                    <th style={{ 
-                      textAlign: 'left', 
-                      padding: '16px 12px',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      color: 'var(--text)',
-                      borderBottom: '1px solid var(--border)'
-                    }}>创建时间</th>
-                    <th style={{ 
-                      textAlign: 'left', 
-                      padding: '16px 12px',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      color: 'var(--text)',
-                      borderBottom: '1px solid var(--border)'
-                    }}>最后登陆</th>
-                    <th style={{ 
-                      textAlign: 'left', 
-                      padding: '16px 12px',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      color: 'var(--text)',
-                      borderBottom: '1px solid var(--border)'
-                    }}>激活状态</th>
-                    <th style={{ 
-                      textAlign: 'left', 
-                      padding: '16px 12px',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      color: 'var(--text)',
-                      borderBottom: '1px solid var(--border)'
-                    }}>订阅状态</th>
-                    <th style={{ 
-                      textAlign: 'left', 
-                      padding: '16px 12px',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      color: 'var(--text)',
-                      borderBottom: '1px solid var(--border)'
-                    }}>订阅到期</th>
-                    <th style={{ 
-                      textAlign: 'center', 
-                      padding: '16px 12px',
-                      fontSize: '14px',
+                      padding: '12px 8px',
+                      fontSize: '13px',
                       fontWeight: '600',
                       color: 'var(--text)',
                       borderBottom: '1px solid var(--border)',
-                      width: '160px'
+                      width: '25%'
+                    }}>邮箱</th>
+                    <th style={{ 
+                      textAlign: 'center', 
+                      padding: '12px 6px',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      color: 'var(--text)',
+                      borderBottom: '1px solid var(--border)',
+                      width: '8%'
+                    }}>手机</th>
+                    <th style={{ 
+                      textAlign: 'center', 
+                      padding: '12px 6px',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      color: 'var(--text)',
+                      borderBottom: '1px solid var(--border)',
+                      width: '12%'
+                    }}>创建</th>
+                    <th style={{ 
+                      textAlign: 'center', 
+                      padding: '12px 6px',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      color: 'var(--text)',
+                      borderBottom: '1px solid var(--border)',
+                      width: '12%'
+                    }}>最后登陆</th>
+                    <th style={{ 
+                      textAlign: 'center', 
+                      padding: '12px 6px',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      color: 'var(--text)',
+                      borderBottom: '1px solid var(--border)',
+                      width: '8%'
+                    }}>状态</th>
+                    <th style={{ 
+                      textAlign: 'center', 
+                      padding: '12px 6px',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      color: 'var(--text)',
+                      borderBottom: '1px solid var(--border)',
+                      width: '10%'
+                    }}>订阅</th>
+                    <th style={{ 
+                      textAlign: 'center', 
+                      padding: '12px 6px',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      color: 'var(--text)',
+                      borderBottom: '1px solid var(--border)',
+                      width: '12%'
+                    }}>到期</th>
+                    <th style={{ 
+                      textAlign: 'center', 
+                      padding: '12px 6px',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      color: 'var(--text)',
+                      borderBottom: '1px solid var(--border)',
+                      width: '8%'
+                    }}>使用次数</th>
+                    <th style={{ 
+                      textAlign: 'center', 
+                      padding: '12px 8px',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      color: 'var(--text)',
+                      borderBottom: '1px solid var(--border)',
+                      width: '13%'
                     }}>操作</th>
                   </tr>
                 </thead>
@@ -347,68 +372,96 @@ export default function AdminBillingPage() {
                       background: index % 2 === 0 ? 'white' : 'var(--bg-page)' 
                     }}>
                       <td style={{ 
-                        padding: '16px 12px',
-                        fontSize: '14px',
+                        padding: '12px 8px',
+                        fontSize: '13px',
                         color: 'var(--text)',
                         borderBottom: '1px solid var(--divider)',
-                        fontWeight: '500'
-                      }}>{u.email}</td>
+                        fontWeight: '500',
+                        maxWidth: '200px',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                      }} title={u.email}>{u.email}</td>
                       <td style={{ 
-                        padding: '16px 12px',
-                        fontSize: '14px',
+                        padding: '12px 6px',
+                        fontSize: '12px',
                         color: 'var(--text-muted)',
-                        borderBottom: '1px solid var(--divider)'
-                      }}>{u.phone || '-'}</td>
+                        borderBottom: '1px solid var(--divider)',
+                        textAlign: 'center'
+                      }}>{u.phone ? '有' : '-'}</td>
                       <td style={{ 
-                        padding: '16px 12px',
-                        fontSize: '14px',
+                        padding: '12px 6px',
+                        fontSize: '12px',
                         color: 'var(--text-muted)',
-                        borderBottom: '1px solid var(--divider)'
+                        borderBottom: '1px solid var(--divider)',
+                        textAlign: 'center'
                       }}>{formatDateTime(u.created_at)}</td>
                       <td style={{ 
-                        padding: '16px 12px',
-                        fontSize: '14px',
+                        padding: '12px 6px',
+                        fontSize: '12px',
                         color: u.last_sign_in_at ? 'var(--text-muted)' : '#9CA3AF',
                         borderBottom: '1px solid var(--divider)',
+                        textAlign: 'center',
                         fontWeight: u.last_sign_in_at ? 'normal' : '500'
                       }}>{formatLastSignIn(u.last_sign_in_at)}</td>
                       <td style={{ 
-                        padding: '16px 12px',
-                        borderBottom: '1px solid var(--divider)'
+                        padding: '12px 6px',
+                        borderBottom: '1px solid var(--divider)',
+                        textAlign: 'center'
                       }}>{getStatusBadge(u.active)}</td>
                       <td style={{ 
-                        padding: '16px 12px',
-                        borderBottom: '1px solid var(--divider)'
+                        padding: '12px 6px',
+                        borderBottom: '1px solid var(--divider)',
+                        textAlign: 'center'
                       }}>{getSubscriptionBadge(u.subscription_status)}</td>
                       <td style={{ 
-                        padding: '16px 12px',
-                        fontSize: '14px',
+                        padding: '12px 6px',
+                        fontSize: '12px',
                         color: 'var(--text-muted)',
-                        borderBottom: '1px solid var(--divider)'
-                      }}>
-                        {u.current_period_end ? new Date(u.current_period_end * 1000).toLocaleString('zh-CN') : '-'}
-                      </td>
-                      <td style={{ 
-                        padding: '12px',
                         borderBottom: '1px solid var(--divider)',
                         textAlign: 'center'
                       }}>
-                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                        {u.current_period_end ? new Date(u.current_period_end * 1000).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) : '-'}
+                      </td>
+                      <td style={{ 
+                        padding: '12px 6px',
+                        fontSize: '12px',
+                        color: 'var(--text)',
+                        borderBottom: '1px solid var(--divider)',
+                        textAlign: 'center',
+                        fontWeight: '600'
+                      }}>
+                        <span style={{
+                          background: (usageStats[u.email] || 0) > 0 ? 'var(--bg-soft)' : '#f3f4f6',
+                          color: (usageStats[u.email] || 0) > 0 ? 'var(--brand)' : 'var(--text-muted)',
+                          padding: '2px 8px',
+                          borderRadius: '12px',
+                          fontSize: '11px',
+                          fontWeight: '500'
+                        }}>
+                          {usageStats[u.email] || 0}
+                        </span>
+                      </td>
+                      <td style={{ 
+                        padding: '8px',
+                        borderBottom: '1px solid var(--divider)',
+                        textAlign: 'center'
+                      }}>
+                        <div style={{ display: 'flex', gap: '3px', justifyContent: 'center' }}>
                           <button 
                             disabled={loading}
                             onClick={() => callAPI({ email: u.email, active: true }, true)}
                             style={{
-                              padding: '6px 10px',
-                              fontSize: '12px',
+                              padding: '4px 6px',
+                              fontSize: '11px',
                               fontWeight: '500',
                               border: '1px solid var(--brand)',
-                              borderRadius: '6px',
+                              borderRadius: '4px',
                               background: u.active ? 'var(--brand)' : 'white',
                               color: u.active ? 'white' : 'var(--brand)',
                               cursor: loading ? 'not-allowed' : 'pointer',
-                              opacity: loading ? 0.6 : u.active ? 1 : 0.8,
-                              transition: 'all 0.2s',
-                              boxShadow: u.active ? '0 2px 4px rgba(27,127,93,0.3)' : 'none'
+                              opacity: loading ? 0.6 : 1,
+                              transition: 'all 0.2s'
                             }}
                           >
                             激活
@@ -417,17 +470,16 @@ export default function AdminBillingPage() {
                             disabled={loading}
                             onClick={() => callAPI({ email: u.email, active: false }, true)}
                             style={{
-                              padding: '6px 10px',
-                              fontSize: '12px',
+                              padding: '4px 6px',
+                              fontSize: '11px',
                               fontWeight: '500',
                               border: '1px solid #DC2626',
-                              borderRadius: '6px',
+                              borderRadius: '4px',
                               background: !u.active ? '#DC2626' : 'white',
                               color: !u.active ? 'white' : '#DC2626',
                               cursor: loading ? 'not-allowed' : 'pointer',
-                              opacity: loading ? 0.6 : !u.active ? 1 : 0.8,
-                              transition: 'all 0.2s',
-                              boxShadow: !u.active ? '0 2px 4px rgba(220,38,38,0.3)' : 'none'
+                              opacity: loading ? 0.6 : 1,
+                              transition: 'all 0.2s'
                             }}
                           >
                             禁用

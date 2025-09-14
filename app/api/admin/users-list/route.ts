@@ -1,32 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
+import { validateAdminToken, createAdminClient, getEnv } from '@/lib/admin-utils';
+import { API_PAGINATION } from '@/lib/constants';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-function getEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env: ${name}`);
-  return v;
-}
-
 export async function GET(req: NextRequest) {
-  const adminToken = process.env.ADMIN_API_TOKEN || '';
-  const provided = req.headers.get('x-admin-token') || '';
-  if (!adminToken || provided !== adminToken) {
+  const providedToken = req.headers.get('x-admin-token') || '';
+  if (!validateAdminToken(providedToken)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const url = getEnv('NEXT_PUBLIC_SUPABASE_URL');
-  const serviceKey = getEnv('SUPABASE_SERVICE_ROLE_KEY');
-  const admin = createSupabaseClient(url, serviceKey);
+  const admin = createAdminClient();
 
   const includeStripe = req.nextUrl.searchParams.get('include_stripe') === '1';
   const stripe = includeStripe ? new Stripe(getEnv('STRIPE_SECRET_KEY')) : null as unknown as Stripe | null;
 
   let page = 1;
-  const perPage = 1000;
+  const perPage = API_PAGINATION.DEFAULT_PAGE_SIZE;
   const rows: any[] = [];
   while (true) {
     const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
