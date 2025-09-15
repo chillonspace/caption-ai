@@ -93,10 +93,16 @@ export default function LoginPage() {
         return;
       }
 
-      // 临时跳过active检查，直接跳转到caption页面
+      // 登录成功且有用户，跳转到caption页面
+      if (user) {
+        setLoading(false);
+        window.location.href = '/caption';
+        return;
+      }
+
+      // 如果没有错误但也没有用户，显示通用错误
       setLoading(false);
-      window.location.href = '/caption';
-      return;
+      setErr('登录失败，请重试');
     } catch (e: unknown) {
       setErr((e as Error)?.message ?? 'Login failed');
       setLoading(false);
