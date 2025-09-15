@@ -152,8 +152,6 @@ export default function CaptionPage() {
   async function handleGenerate() {
     if (!product) return;
     setLoading(true);
-    setCaptions([]);
-    setIdx(0);
     setHint('');
 
     try {
@@ -280,8 +278,13 @@ export default function CaptionPage() {
           return [];
         }
       }
-      const result = normalizeCaptions((data as any)?.captions).slice(0, 3);
-      setCaptions(result);
+      const result = normalizeCaptions((data as any)?.captions).slice(0, 1);
+      setCaptions(prev => {
+        const newCaptions = [...prev, ...result];
+        const finalCaptions = newCaptions.slice(-10); // 只保留最新的10个
+        setIdx(finalCaptions.length - 1); // 跳转到最新文案（数组末尾）
+        return finalCaptions;
+      });
       // Update last 3 opening prefixes with backend-provided opening_prefix first; fallback to header/local extraction
       let pfx = '';
       try {
