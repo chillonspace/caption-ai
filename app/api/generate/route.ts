@@ -7,19 +7,10 @@ import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
-// 安全的中文字符base64编码函数
+// 临时禁用base64编码，直接返回空字符串来测试
 function safeBase64Encode(text: string): string {
-  try {
-    return Buffer.from(text, 'utf8').toString('base64');
-  } catch (e) {
-    // 如果Buffer失败，使用btoa作为fallback
-    try {
-      return btoa(unescape(encodeURIComponent(text)));
-    } catch (e2) {
-      // 最后的fallback，返回空字符串
-      return '';
-    }
-  }
+  // 临时返回空字符串，避免ByteString错误
+  return '';
 }
 
 // 记录用户使用次数
