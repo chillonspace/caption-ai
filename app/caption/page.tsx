@@ -547,7 +547,12 @@ export default function CaptionPage() {
             <motion.div
               style={{
                 ...hintStyle,
-                color: hint.includes('失败') ? 'var(--error)' : 'var(--success)',
+                color: hint.includes('失败') ? '#dc2626' : 'var(--success)',
+                fontWeight: hint.includes('失败') ? '600' : 'normal',
+                backgroundColor: hint.includes('失败') ? '#fef2f2' : 'transparent',
+                padding: hint.includes('失败') ? '12px 16px' : '0',
+                borderRadius: hint.includes('失败') ? '8px' : '0',
+                border: hint.includes('失败') ? '1px solid #fecaca' : 'none',
               }}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
