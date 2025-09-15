@@ -8,13 +8,7 @@ export default async function CaptionLayout({ children }: { children: ReactNode 
   const sb = createServer();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) redirect('/login');
-  // Only redirect when active is explicitly true/false; avoid undefined flicker
-  const activeMeta = (user.app_metadata as any)?.active;
-  if (activeMeta === true) {
-    // ok
-  } else if (activeMeta === false) {
-    redirect('/login');
-  }
+  // 临时跳过active检查，让用户能正常使用
   return <>{children}</>;
 }
 

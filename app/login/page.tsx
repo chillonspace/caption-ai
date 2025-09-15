@@ -93,22 +93,10 @@ export default function LoginPage() {
         return;
       }
 
-      // After login, check strict boolean active flag
-      const active = (user?.app_metadata as any)?.active === true;
-      if (active) {
-        setLoading(false);
-        window.location.href = '/caption';
-        return;
-      }
-
-      // Not active → redirect to Stripe Payment Link
-      const paymentLink = process.env.NEXT_PUBLIC_STRIPE_PAYMENT_LINK_URL;
-      if (paymentLink) {
-        window.location.href = paymentLink; // 外部链接使用window.location.href
-      } else {
-        setErr('Payment link is not configured');
-      }
+      // 临时跳过active检查，直接跳转到caption页面
       setLoading(false);
+      window.location.href = '/caption';
+      return;
     } catch (e: unknown) {
       setErr((e as Error)?.message ?? 'Login failed');
       setLoading(false);
@@ -121,8 +109,7 @@ export default function LoginPage() {
     (async () => {
       try {
         const { data: { user } } = await sb.auth.getUser();
-        const active = (user?.app_metadata as any)?.active === true;
-        if (alive && user && active) {
+        if (alive && user) {
           window.location.href = '/caption';
         }
       } catch {}
