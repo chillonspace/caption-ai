@@ -551,11 +551,22 @@ AirVo 外用舒缓，
       }
       if (timeoutId) clearTimeout(timeoutId);
       if (!res.ok) {
-        const errorText = await res.text();
+        let errorText: string;
+        try {
+          errorText = await res.text();
+        } catch (e) {
+          errorText = `HTTP ${res.status}: ${res.statusText}`;
+        }
         return { error: `Upstream model error: ${errorText}` } as const;
       }
 
-      const data = await res.json();
+      let data: any;
+      try {
+        data = await res.json();
+      } catch (e) {
+        return { error: `Failed to parse JSON response: ${String(e)}` } as const;
+      }
+      
       let text: string = data?.choices?.[0]?.message?.content ?? '';
       text = text.replace(/^```[a-zA-Z]*\n|\n```$/g, '');
       const firstBrace = text.indexOf('{');
