@@ -167,7 +167,10 @@ export default function CaptionPage() {
         }),
       });
 
-      if (!res.ok) throw new Error('Bad response');
+      if (!res.ok) {
+        const errorData = await res.text();
+        throw new Error(`HTTP ${res.status}: ${errorData}`);
+      }
       const data = await res.json();
       
       // 如果是随机模式，记录实际使用的风格
@@ -300,8 +303,9 @@ export default function CaptionPage() {
         try { localStorage.setItem('caption:lastPrefixes', JSON.stringify(next)); } catch {}
       }
     } catch (e) {
-      setHint('生成失败，请重试');
-      setTimeout(() => setHint(''), 3000);
+      console.error('Generation error:', e);
+      setHint(`生成失败: ${(e as Error)?.message || '未知错误'}`);
+      setTimeout(() => setHint(''), 5000);
     } finally {
       setLoading(false);
     }
