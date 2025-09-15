@@ -8,7 +8,8 @@ export default async function CaptionLayout({ children }: { children: ReactNode 
   const sb = createServer();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) redirect('/login');
-  // 临时跳过active检查，让用户能正常使用
+  const active = Boolean((user.app_metadata as any)?.active);
+  if (!active) redirect('/login');
   return <>{children}</>;
 }
 
