@@ -93,11 +93,11 @@ export default function LoginPage() {
         return;
       }
 
-      // After login, check app_metadata.active; if falsey, send to payment link
-      const active = Boolean((user?.app_metadata as any)?.active);
+      // After login, check strict boolean active flag
+      const active = (user?.app_metadata as any)?.active === true;
       if (active) {
         setLoading(false);
-        router.push('/caption');
+        window.location.href = '/caption';
         return;
       }
 
@@ -121,9 +121,9 @@ export default function LoginPage() {
     (async () => {
       try {
         const { data: { user } } = await sb.auth.getUser();
-        const active = Boolean((user?.app_metadata as any)?.active);
+        const active = (user?.app_metadata as any)?.active === true;
         if (alive && user && active) {
-          router.push('/caption');
+          window.location.href = '/caption';
         }
       } catch {}
     })();
