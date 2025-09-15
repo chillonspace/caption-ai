@@ -69,8 +69,7 @@ export default function LoginPage() {
           return;
         }
       } else {
-        // 登录现有用户 - 先退出所有其他设备确保单设备登录
-        await sb.auth.signOut();
+        // 登录现有用户
         const { data, error } = await sb.auth.signInWithPassword({ email, password: pw });
         user = data.user;
         authErr = error;
