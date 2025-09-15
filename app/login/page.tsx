@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 
 export default function LoginPage() {
+  const router = useRouter();
   const sb = createClient();
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
@@ -34,7 +36,7 @@ export default function LoginPage() {
       const adminPortalPassword = process.env.NEXT_PUBLIC_ADMIN_PORTAL_PASSWORD;
       if (adminPortalPassword && pw === adminPortalPassword) {
         setLoading(false);
-        location.href = '/admin/billing';
+        router.push('/admin/billing');
         return;
       }
     } catch {}
@@ -95,17 +97,18 @@ export default function LoginPage() {
       const active = Boolean((user?.app_metadata as any)?.active);
       if (active) {
         setLoading(false);
-        location.href = '/caption';
+        router.push('/caption');
         return;
       }
 
       // Not active → redirect to Stripe Payment Link
       const paymentLink = process.env.NEXT_PUBLIC_STRIPE_PAYMENT_LINK_URL;
       if (paymentLink) {
-        location.href = paymentLink;
+        window.location.href = paymentLink; // 外部链接使用window.location.href
       } else {
         setErr('Payment link is not configured');
       }
+      setLoading(false);
     } catch (e: unknown) {
       setErr((e as Error)?.message ?? 'Login failed');
       setLoading(false);
@@ -119,11 +122,13 @@ export default function LoginPage() {
       try {
         const { data: { user } } = await sb.auth.getUser();
         const active = Boolean((user?.app_metadata as any)?.active);
-        if (alive && user && active) location.href = '/caption';
+        if (alive && user && active) {
+          router.push('/caption');
+        }
       } catch {}
     })();
     return () => { alive = false; };
-  }, [sb]);
+  }, []); // 移除sb依赖，避免重复执行
 
   return (
     <main className="login-main">
