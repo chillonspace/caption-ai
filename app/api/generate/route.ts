@@ -7,6 +7,21 @@ import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
+// 安全的中文字符base64编码函数
+function safeBase64Encode(text: string): string {
+  try {
+    return Buffer.from(text, 'utf8').toString('base64');
+  } catch (e) {
+    // 如果Buffer失败，使用btoa作为fallback
+    try {
+      return btoa(unescape(encodeURIComponent(text)));
+    } catch (e2) {
+      // 最后的fallback，返回空字符串
+      return '';
+    }
+  }
+}
+
 // 记录用户使用次数
 async function recordUsage(email: string) {
   try {
@@ -681,7 +696,7 @@ AirVo 外用舒缓，
         ENABLE_SLA ? { timeoutMs: 1500, quick: true } : { quick: true }
       );
       if (!('error' in retryQuick) && !('timeout' in retryQuick)) {
-        const p64 = Buffer.from(retryQuick.openingPrefix || '', 'utf8').toString('base64');
+        const p64 = safeBase64Encode(retryQuick.openingPrefix || '');
         const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
         const usedStyleChinese = styleMapping[styleKey] || styleKey;
         return new NextResponse(
@@ -697,7 +712,7 @@ AirVo 外用舒缓，
       const tags = ['#10secHerbs', `#${productKey}`].concat([pick(flatFacts), pick(flatFacts)].filter(Boolean).slice(0,2)).slice(0,5).map(t=>`#${String(t).replace(/\s+/g,'')}`);
       const local = [p1, p2, '', tags.join(' ')].filter(Boolean).join('\n');
       {
-        const p64 = Buffer.from(extractOpeningPrefix(local) || '', 'utf8').toString('base64');
+        const p64 = safeBase64Encode(extractOpeningPrefix(local) || '');
         const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
         const usedStyleChinese = styleMapping[styleKey] || styleKey;
         return new NextResponse(
@@ -713,7 +728,7 @@ AirVo 外用舒缓，
       if ('error' in second) {
         // fallback to first if retry failed upstream
         {
-          const p64 = Buffer.from(first.openingPrefix || '', 'utf8').toString('base64');
+          const p64 = safeBase64Encode(first.openingPrefix || '');
         const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
         const usedStyleChinese = styleMapping[styleKey] || styleKey;
         return new NextResponse(
@@ -732,7 +747,7 @@ AirVo 外用舒缓，
           ENABLE_SLA ? { timeoutMs: 1500, quick: true } : { quick: true }
         );
         if (!('error' in quick) && !('timeout' in quick)) {
-          const p64 = Buffer.from(quick.openingPrefix || '', 'utf8').toString('base64');
+          const p64 = safeBase64Encode(quick.openingPrefix || '');
           const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
           const usedStyleChinese = styleMapping[styleKey] || styleKey;
           return new NextResponse(
@@ -742,7 +757,7 @@ AirVo 外用舒缓，
         }
         const local2 = first.finalCaptions[0] || '';
         {
-          const p64 = Buffer.from(extractOpeningPrefix(local2) || '', 'utf8').toString('base64');
+          const p64 = safeBase64Encode(extractOpeningPrefix(local2) || '');
           const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
           const usedStyleChinese = styleMapping[styleKey] || styleKey;
           return new NextResponse(
@@ -753,7 +768,7 @@ AirVo 外用舒缓，
       }
       // if second still collides, return second anyway (已重试一次)
       {
-        const p64 = Buffer.from(second.openingPrefix || '', 'utf8').toString('base64');
+        const p64 = safeBase64Encode(second.openingPrefix || '');
         const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
         const usedStyleChinese = styleMapping[styleKey] || styleKey;
         return new NextResponse(
@@ -765,7 +780,7 @@ AirVo 外用舒缓，
 
     // first is fine
     {
-      const p64 = Buffer.from(first.openingPrefix || '', 'utf8').toString('base64');
+      const p64 = safeBase64Encode(first.openingPrefix || '');
       const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
       const usedStyleChinese = styleMapping[styleKey] || styleKey;
       
