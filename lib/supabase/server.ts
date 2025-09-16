@@ -13,11 +13,15 @@ export function createServer() {
       },
       async set(name: string, value: string, options: any) {
         const store = await cookieStore as any;
-        store.set({ name, value, ...options });
+        if (typeof store?.set === 'function') {
+          store.set({ name, value, ...options });
+        }
       },
       async remove(name: string, options: any) {
         const store = await cookieStore as any;
-        store.set({ name, value: '', ...options });
+        if (typeof store?.set === 'function') {
+          store.set({ name, value: '', ...options });
+        }
       },
     },
   });

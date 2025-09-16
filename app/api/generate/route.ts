@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 // 临时禁用base64编码，直接返回空字符串来测试
 function safeBase64Encode(text: string): string {
@@ -42,18 +43,27 @@ async function recordUsage(email: string) {
 
 export async function POST(req: NextRequest) {
   try {
-    // 验证用户登录状态
-    const sb = createServer();
-    const { data: { user } } = await sb.auth.getUser();
-    
-    if (!user?.email) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    // 验证用户登录状态 + 使用统计（S1）
+    let userEmail: string | null = null;
+    try {
+      const sb = createServer();
+      const { data: { user } } = await sb.auth.getUser();
+      if (!user?.email) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+      userEmail = user.email;
+      await recordUsage(user.email);
+    } catch (e: any) {
+      return NextResponse.json({ error: 'Request failed', detail: `S1: ${String(e?.message || e)}` }, { status: 500 });
     }
-    
-    // 记录使用次数
-    await recordUsage(user.email);
-    
-    const { product, platform, ban_opening_prefixes, style, ban_recent_styles } = await req.json();
+
+    // 读取请求 JSON（S2）
+    let product: any, platform: any, ban_opening_prefixes: any, style: any, ban_recent_styles: any;
+    try {
+      ({ product, platform, ban_opening_prefixes, style, ban_recent_styles } = await req.json());
+    } catch (e: any) {
+      return NextResponse.json({ error: 'Request failed', detail: `S2: ${String(e?.message || e)}` }, { status: 500 });
+    }
 
     // --- Minimal KB wiring & platform profiles (inline; no new files) ---
     const KB: any = kbJson as any;
@@ -231,8 +241,11 @@ export async function POST(req: NextRequest) {
       return res;
     }
 
-    if (!process.env.DEEPSEEK_API_KEY) {
-      return NextResponse.json({ error: 'Missing DEEPSEEK_API_KEY' }, { status: 500 });
+    // Sanitize upstream API key to avoid non-ASCII in headers (ByteString errors)
+    const cleanAscii = (s: unknown) => String(s ?? '').replace(/[^\x20-\x7E]/g, '').trim();
+    const DEEPSEEK_KEY = cleanAscii(process.env.DEEPSEEK_API_KEY);
+    if (!DEEPSEEK_KEY) {
+      return NextResponse.json({ error: 'Missing or invalid DEEPSEEK_API_KEY' }, { status: 500 });
     }
 
     if (!product) {
@@ -541,7 +554,7 @@ AirVo 外用舒缓，
         res = await fetch('https://api.deepseek.com/v1/chat/completions', {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+          Authorization: `Bearer ${DEEPSEEK_KEY}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
@@ -692,7 +705,7 @@ AirVo 外用舒缓，
         const usedStyleChinese = styleMapping[styleKey] || styleKey;
         return new NextResponse(
           JSON.stringify({ captions: retryQuick.finalCaptions, used_style: usedStyleChinese }),
-          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': usedStyleChinese, 'X-Used-Style': usedStyleChinese, 'X-Opening-Prefix-B64': p64 } }
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
         );
       }
       // Ultimate local fallback (very short template from KB)
@@ -708,7 +721,7 @@ AirVo 外用舒缓，
         const usedStyleChinese = styleMapping[styleKey] || styleKey;
         return new NextResponse(
           JSON.stringify({ captions: [local], used_style: usedStyleChinese }),
-          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': usedStyleChinese, 'X-Used-Style': usedStyleChinese, 'X-Opening-Prefix-B64': p64 } }
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
         );
       }
     }
@@ -724,7 +737,7 @@ AirVo 外用舒缓，
         const usedStyleChinese = styleMapping[styleKey] || styleKey;
         return new NextResponse(
           JSON.stringify({ captions: first.finalCaptions, used_style: usedStyleChinese }),
-          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': usedStyleChinese, 'X-Used-Style': usedStyleChinese, 'X-Opening-Prefix-B64': p64 } }
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
         );
         }
       }
@@ -743,7 +756,7 @@ AirVo 外用舒缓，
           const usedStyleChinese = styleMapping[styleKey] || styleKey;
           return new NextResponse(
             JSON.stringify({ captions: quick.finalCaptions, used_style: usedStyleChinese }),
-            { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': usedStyleChinese, 'X-Used-Style': usedStyleChinese, 'X-Opening-Prefix-B64': p64 } }
+            { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
           );
         }
         const local2 = first.finalCaptions[0] || '';
@@ -753,7 +766,7 @@ AirVo 外用舒缓，
           const usedStyleChinese = styleMapping[styleKey] || styleKey;
           return new NextResponse(
             JSON.stringify({ captions: [local2], used_style: usedStyleChinese }),
-            { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': usedStyleChinese, 'X-Used-Style': usedStyleChinese, 'X-Opening-Prefix-B64': p64 } }
+            { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
           );
         }
       }
@@ -764,7 +777,7 @@ AirVo 外用舒缓，
         const usedStyleChinese = styleMapping[styleKey] || styleKey;
         return new NextResponse(
           JSON.stringify({ captions: second.finalCaptions, used_style: usedStyleChinese }),
-          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0', 'X-Style-Used': usedStyleChinese, 'X-Used-Style': usedStyleChinese, 'X-Opening-Prefix-B64': p64 } }
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
         );
       }
     }
@@ -779,10 +792,7 @@ AirVo 外用舒缓，
         JSON.stringify({ captions: first.finalCaptions, used_style: usedStyleChinese }),
         { status: 200, headers: { 
           'Content-Type': 'application/json', 
-          'Cache-Control': 'no-store, max-age=0', 
-          'X-Style-Used': usedStyleChinese, 
-          'X-Used-Style': usedStyleChinese,
-          'X-Opening-Prefix-B64': p64 
+          'Cache-Control': 'no-store, max-age=0'
         } }
       );
     }
