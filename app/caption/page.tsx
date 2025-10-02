@@ -186,6 +186,27 @@ export default function CaptionPage() {
     }
   }
 
+  async function handleManageSubscription() {
+    try {
+      const res = await fetch('/api/stripe/portal', { method: 'POST' });
+      if (!res.ok) {
+        try {
+          const err = await res.json();
+          throw new Error(String(err?.error || `HTTP ${res.status}`));
+        } catch {
+          throw new Error(`HTTP ${res.status}`);
+        }
+      }
+      const data = await res.json();
+      const url = String((data as any)?.url || '');
+      if (!url) throw new Error('未获得账单门户链接');
+      window.location.href = url;
+    } catch (e) {
+      setHint(`打开订阅管理失败: ${(e as Error)?.message || '未知错误'}`);
+      setTimeout(() => setHint(''), 4000);
+    }
+  }
+
   async function handleGenerate() {
     if (!product) return;
     setLoading(true);
@@ -660,15 +681,90 @@ export default function CaptionPage() {
 
               {/* Actions: Main row (换图片 / 换文案 / 更多) */}
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap: 12, marginTop: 8 }}>
-                <motion.button className="btn-premium" whileTap={{ scale: 0.98 }} whileHover={{ scale: 1.02 }} disabled={imgLoading || images.length >= 3 || !product} onClick={() => handleGenerateImage()}>
-                  {images.length >= 3 ? '换图片（已上限）' : `换图片（剩余 ${3 - images.length}）`}
+                <motion.button 
+                  className="btn-premium" 
+                  whileTap={{ scale: 0.98 }} 
+                  whileHover={{ scale: 1.02 }} 
+                  disabled={imgLoading || images.length >= 3 || !product} 
+                  onClick={() => handleGenerateImage()}
+                  style={{ textAlign:'center', lineHeight: 1.2, padding: '10px 8px' }}
+                >
+                  {images.length >= 3 ? (
+                    <span style={{ display:'inline-block' }}>
+                      <span>换图片</span>
+                      <br />
+                      <span style={{ fontSize: 12, color: '#9ca3af' }}>上限</span>
+                    </span>
+                  ) : (
+                    <span style={{ display:'inline-block' }}>
+                      <span>换图片</span>
+                      <br />
+                      <span style={{ fontSize: 12, color: '#9ca3af' }}>剩余 {3 - images.length}</span>
+                    </span>
+                  )}
                 </motion.button>
                 <motion.button className="btn-secondary" whileTap={{ scale: 0.98 }} whileHover={{ scale: 1.02 }} onClick={handleGenerate}>
                   换文案（{captions.length}）
                 </motion.button>
-                <motion.button className="btn-secondary" whileTap={{ scale: 0.98 }} whileHover={{ scale: 1.02 }} onClick={() => setMoreOpen(v => !v)}>
-                  更多
-                </motion.button>
+                <div style={{ position:'relative' }}>
+                  <motion.button 
+                    className="btn-secondary" 
+                    whileTap={{ scale: 0.98 }} 
+                    whileHover={{ scale: 1.02 }} 
+                    onClick={() => setMoreOpen(v => !v)}
+                    style={{ width:'100%' }}
+                  >
+                    更多
+                  </motion.button>
+                  {moreOpen && (
+                    <div
+                      style={{
+                        position:'absolute',
+                        zIndex: 40,
+                        right: 0,
+                        top: 'calc(100% + 8px)',
+                        background:'#ffffff',
+                        color:'var(--text)',
+                        border:'1px solid var(--border)',
+                        borderRadius: 12,
+                        padding: 8,
+                        boxShadow:'0 8px 24px rgba(0,0,0,.12)',
+                        minWidth: 180,
+                        maxWidth: 'min(80vw, 260px)'
+                      }}
+                    >
+                      <motion.button
+                        className="menu-item"
+                        whileHover={{ backgroundColor: '#f3f4f6' }}
+                        style={{
+                          display:'block', width:'100%', textAlign:'left',
+                          background:'#fff', color:'var(--text)',
+                          padding:'10px 12px', border:'1px solid var(--border)', borderRadius:10, fontSize:14,
+                          cursor:'pointer'
+                        }}
+                        onClick={() => { setMoreOpen(false); handleDownloadText(display); }}
+                      >
+                        下载文案
+                      </motion.button>
+                      <div style={{ height:8 }} />
+                      <motion.button
+                        className="menu-item"
+                        whileHover={images.length === 0 ? {} : { backgroundColor: '#f3f4f6' }}
+                        style={{
+                          display:'block', width:'100%', textAlign:'left',
+                          background:'#fff', color:'var(--text)',
+                          padding:'10px 12px', border:'1px solid var(--border)', borderRadius:10, fontSize:14,
+                          opacity: images.length === 0 ? 0.5 : 1,
+                          cursor: images.length === 0 ? 'not-allowed' : 'pointer'
+                        }}
+                        disabled={images.length === 0}
+                        onClick={() => { setMoreOpen(false); if (images[imgIdx]) handleDownloadImage(images[imgIdx]); }}
+                      >
+                        下载图片
+                      </motion.button>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Actions: Second row (复制 / 分享) */}
@@ -681,57 +777,7 @@ export default function CaptionPage() {
                 </motion.button>
               </div>
 
-              {/* More dropdown: 下载图片 / 下载文案 */}
-              <div style={{ marginTop: 8, position:'relative' }}>
-                {moreOpen && (
-                  <div
-                    style={{
-                      position:'absolute',
-                      zIndex: 40,
-                      right: 0,
-                      top: 'calc(100% + 8px)',
-                      background:'#ffffff',
-                      color:'var(--text)',
-                      border:'1px solid var(--border)',
-                      borderRadius: 12,
-                      padding: 8,
-                      boxShadow:'0 8px 24px rgba(0,0,0,.12)',
-                      minWidth: 180,
-                      maxWidth: 'min(80vw, 260px)'
-                    }}
-                  >
-                    <motion.button
-                      className="menu-item"
-                      whileHover={{ backgroundColor: '#f3f4f6' }}
-                      style={{
-                        display:'block', width:'100%', textAlign:'left',
-                        background:'#fff', color:'var(--text)',
-                        padding:'10px 12px', border:'1px solid var(--border)', borderRadius:10, fontSize:14,
-                        cursor:'pointer'
-                      }}
-                      onClick={() => { setMoreOpen(false); handleDownloadText(display); }}
-                    >
-                      下载文案
-                    </motion.button>
-                    <div style={{ height:8 }} />
-                    <motion.button
-                      className="menu-item"
-                      whileHover={images.length === 0 ? {} : { backgroundColor: '#f3f4f6' }}
-                      style={{
-                        display:'block', width:'100%', textAlign:'left',
-                        background:'#fff', color:'var(--text)',
-                        padding:'10px 12px', border:'1px solid var(--border)', borderRadius:10, fontSize:14,
-                        opacity: images.length === 0 ? 0.5 : 1,
-                        cursor: images.length === 0 ? 'not-allowed' : 'pointer'
-                      }}
-                      disabled={images.length === 0}
-                      onClick={() => { setMoreOpen(false); if (images[imgIdx]) handleDownloadImage(images[imgIdx]); }}
-                    >
-                      下载图片
-                    </motion.button>
-                  </div>
-                )}
-              </div>
+              
             </motion.div>
           )}
         </AnimatePresence>
@@ -798,6 +844,7 @@ export default function CaptionPage() {
                   <option value="zh">🇨🇳 中文</option>
                   <option value="en">🇬🇧 English</option>
                 </select>
+                <button className="menu-item" onClick={handleManageSubscription}>管理订阅/账单</button>
                 <button className="menu-item" onClick={handleSignOut}>退出登录</button>
               </div>
             </motion.aside>

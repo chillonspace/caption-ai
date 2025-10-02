@@ -4,6 +4,8 @@ import { STYLE_OPTIONS_ZH } from '@/lib/constants';
 import { createServer } from '@/lib/supabase/server';
 import fs from 'fs';
 import path from 'path';
+import Stripe from 'stripe';
+import { getEnv } from '@/lib/admin-utils';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -56,6 +58,53 @@ export async function POST(req: NextRequest) {
     } catch (e: any) {
       return NextResponse.json({ error: 'Request failed', detail: `S1: ${String(e?.message || e)}` }, { status: 500 });
     }
+
+    // 按订阅周期（Stripe period）或自然月检查文案额度（默认 2000，可用 CAPTION_MONTHLY_LIMIT 覆盖）
+    try {
+      const CAPTION_LIMIT = parseInt(String(process.env.CAPTION_MONTHLY_LIMIT || '2000')) || 2000;
+      // 计算周期 key：优先使用 Stripe 订阅周期，否则退回自然月
+      async function computeBucketKey(email: string): Promise<string> {
+        try {
+          const stripe = new Stripe(getEnv('STRIPE_SECRET_KEY'));
+          const custs = await stripe.customers.list({ email, limit: 1 });
+          const cust = custs.data?.[0];
+          if (cust) {
+            const subs = await stripe.subscriptions.list({ customer: cust.id, status: 'all', limit: 1 });
+            const sub = subs.data?.[0];
+            const start = Number(sub?.current_period_start || 0);
+            const end = Number(sub?.current_period_end || 0);
+            if (start > 0 && end > 0) return `cycle:${start}-${end}`;
+          }
+        } catch {}
+        const d = new Date();
+        const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        return `month:${ym}`;
+      }
+      const bucketKey = await computeBucketKey(String(userEmail || '').toLowerCase());
+      const monthlyFile = path.join(process.cwd(), 'data', 'usage-monthly.json');
+      let monthly: any = {};
+      if (fs.existsSync(monthlyFile)) {
+        try { monthly = JSON.parse(fs.readFileSync(monthlyFile, 'utf8')); } catch { monthly = {}; }
+      }
+      const used = Number(monthly?.[bucketKey]?.[String(userEmail).toLowerCase()]?.captions || 0);
+      if (used >= CAPTION_LIMIT) {
+        return NextResponse.json({ error: '本周期文案额度已用完', limit: CAPTION_LIMIT }, { status: 429 });
+      }
+      // 帮助函数：成功后累计一次文案使用
+      function incMonthlyCaption() {
+        try {
+          const dir = path.dirname(monthlyFile);
+          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+          if (!monthly[bucketKey]) monthly[bucketKey] = {};
+          const key = String(userEmail).toLowerCase();
+          if (!monthly[bucketKey][key]) monthly[bucketKey][key] = { captions: 0, images: 0 };
+          monthly[bucketKey][key].captions = Number(monthly[bucketKey][key].captions || 0) + 1;
+          fs.writeFileSync(monthlyFile, JSON.stringify(monthly, null, 2));
+        } catch {}
+      }
+      // 将函数放入闭包范围供后续成功返回前调用
+      (globalThis as any).__incMonthlyCaption = incMonthlyCaption;
+    } catch {}
 
     // 读取请求 JSON（S2）
     let product: any, platform: any, ban_opening_prefixes: any, style: any, ban_recent_styles: any;
@@ -585,7 +634,67 @@ AirVo 外用舒缓，
       } catch (e) {
         return { error: `Failed to parse JSON response: ${String(e)}` } as const;
       }
-      
+      // Record usage & estimated cost (best-effort, non-blocking)
+      try {
+        const usage = (data as any)?.usage || {};
+        const promptTokens = Number(usage?.prompt_tokens || 0) || 0;
+        const completionTokens = Number(usage?.completion_tokens || 0) || 0;
+        const totalTokens = Number(usage?.total_tokens || (promptTokens + completionTokens)) || 0;
+        const modelUsed = String((data as any)?.model || (payload as any)?.model || 'unknown');
+
+        // Pricing (USD per 1k tokens)
+        const inputRate = parseFloat(String(process.env.DS_INPUT_USD_PER_1K || '0')) || 0;
+        const outputRate = parseFloat(String(process.env.DS_OUTPUT_USD_PER_1K || '0')) || 0;
+        const estimatedCostUsd = (promptTokens / 1000) * inputRate + (completionTokens / 1000) * outputRate;
+
+        const costFile = path.join(process.cwd(), 'data', 'cost-stats.json');
+        const dir = path.dirname(costFile);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+        let agg: any = {
+          samples: 0,
+          sum_prompt_tokens: 0,
+          sum_completion_tokens: 0,
+          sum_total_tokens: 0,
+          sum_cost_usd: 0,
+          by_model: {},
+        };
+        if (fs.existsSync(costFile)) {
+          try { agg = JSON.parse(fs.readFileSync(costFile, 'utf8')); } catch {}
+        }
+        agg.samples = (agg.samples || 0) + 1;
+        agg.sum_prompt_tokens = (agg.sum_prompt_tokens || 0) + promptTokens;
+        agg.sum_completion_tokens = (agg.sum_completion_tokens || 0) + completionTokens;
+        agg.sum_total_tokens = (agg.sum_total_tokens || 0) + totalTokens;
+        agg.sum_cost_usd = (agg.sum_cost_usd || 0) + estimatedCostUsd;
+        agg.by_model = agg.by_model || {};
+        const m = agg.by_model[modelUsed] || { samples: 0, sum_prompt_tokens: 0, sum_completion_tokens: 0, sum_total_tokens: 0, sum_cost_usd: 0 };
+        m.samples += 1;
+        m.sum_prompt_tokens += promptTokens;
+        m.sum_completion_tokens += completionTokens;
+        m.sum_total_tokens += totalTokens;
+        m.sum_cost_usd += estimatedCostUsd;
+        agg.by_model[modelUsed] = m;
+
+        // Optional: per-user breakdown minimal
+        try {
+          const emailKey = String(userEmail || '').toLowerCase();
+          if (emailKey) {
+            agg.by_user = agg.by_user || {};
+            const u = agg.by_user[emailKey] || { samples: 0, sum_total_tokens: 0, sum_cost_usd: 0 };
+            u.samples += 1;
+            u.sum_total_tokens += totalTokens;
+            u.sum_cost_usd += estimatedCostUsd;
+            agg.by_user[emailKey] = u;
+          }
+        } catch {}
+
+        fs.writeFileSync(costFile, JSON.stringify(agg, null, 2));
+      } catch (_) {
+        // swallow logging errors
+      }
+
       let text: string = data?.choices?.[0]?.message?.content ?? '';
       text = text.replace(/^```[a-zA-Z]*\n|\n```$/g, '');
       const firstBrace = text.indexOf('{');
@@ -703,6 +812,7 @@ AirVo 外用舒缓，
         const p64 = safeBase64Encode(retryQuick.openingPrefix || '');
         const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
         const usedStyleChinese = styleMapping[styleKey] || styleKey;
+        try { (globalThis as any).__incMonthlyCaption?.(); } catch {}
         return new NextResponse(
           JSON.stringify({ captions: retryQuick.finalCaptions, used_style: usedStyleChinese }),
           { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
@@ -719,6 +829,7 @@ AirVo 外用舒缓，
         const p64 = safeBase64Encode(extractOpeningPrefix(local) || '');
         const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
         const usedStyleChinese = styleMapping[styleKey] || styleKey;
+        try { (globalThis as any).__incMonthlyCaption?.(); } catch {}
         return new NextResponse(
           JSON.stringify({ captions: [local], used_style: usedStyleChinese }),
           { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
@@ -735,6 +846,7 @@ AirVo 外用舒缓，
           const p64 = safeBase64Encode(first.openingPrefix || '');
         const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
         const usedStyleChinese = styleMapping[styleKey] || styleKey;
+        try { (globalThis as any).__incMonthlyCaption?.(); } catch {}
         return new NextResponse(
           JSON.stringify({ captions: first.finalCaptions, used_style: usedStyleChinese }),
           { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
@@ -754,6 +866,7 @@ AirVo 外用舒缓，
           const p64 = safeBase64Encode(quick.openingPrefix || '');
           const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
           const usedStyleChinese = styleMapping[styleKey] || styleKey;
+          try { (globalThis as any).__incMonthlyCaption?.(); } catch {}
           return new NextResponse(
             JSON.stringify({ captions: quick.finalCaptions, used_style: usedStyleChinese }),
             { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
@@ -764,6 +877,7 @@ AirVo 外用舒缓，
           const p64 = safeBase64Encode(extractOpeningPrefix(local2) || '');
           const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
           const usedStyleChinese = styleMapping[styleKey] || styleKey;
+          try { (globalThis as any).__incMonthlyCaption?.(); } catch {}
           return new NextResponse(
             JSON.stringify({ captions: [local2], used_style: usedStyleChinese }),
             { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
@@ -775,6 +889,7 @@ AirVo 外用舒缓，
         const p64 = safeBase64Encode(second.openingPrefix || '');
         const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
         const usedStyleChinese = styleMapping[styleKey] || styleKey;
+        try { (globalThis as any).__incMonthlyCaption?.(); } catch {}
         return new NextResponse(
           JSON.stringify({ captions: second.finalCaptions, used_style: usedStyleChinese }),
           { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
@@ -787,7 +902,7 @@ AirVo 外用舒缓，
       const p64 = safeBase64Encode(first.openingPrefix || '');
       const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
       const usedStyleChinese = styleMapping[styleKey] || styleKey;
-      
+      try { (globalThis as any).__incMonthlyCaption?.(); } catch {}
       return new NextResponse(
         JSON.stringify({ captions: first.finalCaptions, used_style: usedStyleChinese }),
         { status: 200, headers: { 

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServer } from '@/lib/supabase/server';
+import Stripe from 'stripe';
+import { getEnv } from '@/lib/admin-utils';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -47,6 +49,49 @@ export async function POST(req: NextRequest) {
       if (!user?.email) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
       }
+      // 按订阅周期或自然月检查图片额度（默认 100，可用 IMAGE_MONTHLY_LIMIT 覆盖）
+      try {
+        const email = String(user.email).toLowerCase();
+        const IMAGE_LIMIT = parseInt(String(process.env.IMAGE_MONTHLY_LIMIT || '100')) || 100;
+        async function computeBucketKey(email: string): Promise<string> {
+          try {
+            const stripe = new Stripe(getEnv('STRIPE_SECRET_KEY'));
+            const custs = await stripe.customers.list({ email, limit: 1 });
+            const cust = custs.data?.[0];
+            if (cust) {
+              const subs = await stripe.subscriptions.list({ customer: cust.id, status: 'all', limit: 1 });
+              const sub = subs.data?.[0];
+              const start = Number(sub?.current_period_start || 0);
+              const end = Number(sub?.current_period_end || 0);
+              if (start > 0 && end > 0) return `cycle:${start}-${end}`;
+            }
+          } catch {}
+          const d = new Date();
+          const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          return `month:${ym}`;
+        }
+        const bucketKey = await computeBucketKey(email);
+        const monthlyFile = require('path').join(process.cwd(), 'data', 'usage-monthly.json');
+        const fs2 = require('fs');
+        let monthly: any = {};
+        if (fs2.existsSync(monthlyFile)) {
+          try { monthly = JSON.parse(fs2.readFileSync(monthlyFile, 'utf8')); } catch { monthly = {}; }
+        }
+        const used = Number(monthly?.[bucketKey]?.[email]?.images || 0);
+        if (used >= IMAGE_LIMIT) {
+          return NextResponse.json({ error: '本周期图片额度已用完', limit: IMAGE_LIMIT }, { status: 429 });
+        }
+        (globalThis as any).__incMonthlyImage = () => {
+          try {
+            const dir = require('path').dirname(monthlyFile);
+            if (!fs2.existsSync(dir)) fs2.mkdirSync(dir, { recursive: true });
+            if (!monthly[bucketKey]) monthly[bucketKey] = {};
+            if (!monthly[bucketKey][email]) monthly[bucketKey][email] = { captions: 0, images: 0 };
+            monthly[bucketKey][email].images = Number(monthly[bucketKey][email].images || 0) + 1;
+            fs2.writeFileSync(monthlyFile, JSON.stringify(monthly, null, 2));
+          } catch {}
+        };
+      } catch {}
     } catch (e: any) {
       return NextResponse.json({ error: 'Request failed', detail: `AUTH: ${String(e?.message || e)}` }, { status: 500 });
     }
@@ -134,15 +179,18 @@ export async function POST(req: NextRequest) {
 
     const falResult = await tryFal();
     if (falResult) {
+      try { (globalThis as any).__incMonthlyImage?.(); } catch {}
       return NextResponse.json(falResult, { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } });
     }
     const staResult = await tryStability();
     if (staResult) {
+      try { (globalThis as any).__incMonthlyImage?.(); } catch {}
       return NextResponse.json(staResult, { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } });
     }
 
     // 占位图兜底
     clearTimeout(timeoutId);
+    try { (globalThis as any).__incMonthlyImage?.(); } catch {}
     return NextResponse.json({ image_url: placeholderUrl(width, height, seed), provider: 'placeholder', seed: seed || '' }, { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } });
   } catch (err: unknown) {
     return NextResponse.json(
