@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
 
     // Provider 1: fal.ai（若提供 FAL_KEY）
     async function tryFal() {
-      if (!FAL_KEY) return null as const;
+      if (!FAL_KEY) return null;
       try {
         const res = await fetch('https://fal.run/fal-ai/flux/dev', {
           method: 'POST',
@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
           }),
           signal: controller.signal,
         });
-        if (!res.ok) return null as const;
+        if (!res.ok) return null;
         const data = await res.json();
         const url = data?.image?.url || data?.images?.[0]?.url || data?.result?.image?.url;
         if (typeof url === 'string' && url) {
@@ -99,12 +99,12 @@ export async function POST(req: NextRequest) {
           return { image_url: url as string, provider: 'fal.ai', seed: String(seed || data?.seed || '') } as const;
         }
       } catch (_) {}
-      return null as const;
+      return null;
     }
 
     // Provider 2: Stability（若提供 STABILITY_API_KEY）
     async function tryStability() {
-      if (!STABILITY_API_KEY) return null as const;
+      if (!STABILITY_API_KEY) return null;
       try {
         const form = new FormData();
         form.append('prompt', prompt);
@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
           body: form,
           signal: controller.signal,
         });
-        if (!res.ok) return null as const;
+        if (!res.ok) return null;
         // v2beta 返回的是二进制图片；为简化直接用 data URL 承载
         const arrayBuf = await res.arrayBuffer();
         const base64 = Buffer.from(arrayBuf).toString('base64');
@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
         clearTimeout(timeoutId);
         return { image_url: dataUrl, provider: 'stability', seed: seed || '' } as const;
       } catch (_) {}
-      return null as const;
+      return null;
     }
 
     const falResult = await tryFal();
