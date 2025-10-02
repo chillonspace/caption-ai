@@ -189,18 +189,34 @@ html, body, #__next, [data-nextjs-scroll-focus-boundary] {
 }
 /* 右侧汉堡按钮造型 */
 .nav-icon{
-  inline-size: 28px; block-size: 28px; border-radius: 8px;
+  inline-size: 44px; block-size: 44px; border-radius: 12px;
   display: grid; place-items: center;
+  position: fixed; z-index: 50;
+  top: max(12px, env(safe-area-inset-top) + 8px);
+  right: max(12px, env(safe-area-inset-right) + 8px);
   background: #fff; border: 1px solid var(--border); color: #111827;
+  box-shadow: 0 6px 16px rgba(17,24,39,.08), 0 1px 3px rgba(17,24,39,.06);
   cursor: pointer;
+  transition: transform .12s ease, box-shadow .12s ease, background-color .12s ease;
 }
-.nav-hamburger{ inline-size: 16px; block-size: 10px; position: relative; }
+.nav-hamburger{ inline-size: 20px; block-size: 12px; position: relative; }
 .nav-hamburger::before,.nav-hamburger::after,.nav-hamburger div{
   content:""; position:absolute; inset-inline:0; block-size:2px;
-  background: currentColor; opacity: .95;
+  background: currentColor; opacity: .95; border-radius: 1px;
 }
 .nav-hamburger div{ top:50%; transform: translateY(-50%); }
 .nav-hamburger::before{ top:0; } .nav-hamburger::after{ bottom:0; }
+
+.nav-icon:hover{ transform: translateY(-1px); box-shadow: 0 8px 20px rgba(17,24,39,.10), 0 2px 6px rgba(17,24,39,.06); }
+.nav-icon:active{ transform: translateY(0); }
+.nav-icon:focus-visible{ outline: 2px solid #2563EB; outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce){ .nav-icon{ transition: none; } }
+
+@media (prefers-color-scheme: dark){
+  .nav-icon{ background: #fff; border-color: rgba(255,255,255,0.16); color: #111827; }
+  .nav-icon:hover{ box-shadow: 0 8px 20px rgba(0,0,0,.20), 0 2px 6px rgba(0,0,0,.10); }
+}
 
 /* Safe area top padding for iOS */
 .safe-area-top{padding-top:env(safe-area-inset-top);} 

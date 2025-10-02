@@ -20,10 +20,19 @@ export default function CaptionPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [lang, setLang] = useState<'zh' | 'en'>('zh');
   const [userEmail, setUserEmail] = useState<string>('');
+  // Image generation states
+  const [images, setImages] = useState<string[]>([]);
+  const [imgIdx, setImgIdx] = useState(0);
+  const [imgLoading, setImgLoading] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   // Keep last 3 opening prefixes to avoid repetitive openings across runs
   const lastPrefixesRef = useRef<string[]>([]);
   // Keep last 2-3 styles to avoid repetitive styles in random mode
   const lastStylesRef = useRef<string[]>([]);
+  // Touch swipe refs for image navigation
+  const imgTouchStartXRef = useRef<number | null>(null);
+  const imgTouchStartYRef = useRef<number | null>(null);
+  const imgTouchStartTimeRef = useRef<number>(0);
 
   function extractOpeningPrefix(text: string): string {
     try {
@@ -91,6 +100,34 @@ export default function CaptionPage() {
     }
     touchStartXRef.current = null;
     touchStartYRef.current = null;
+  }
+
+  // Image swipe handlers
+  function handleImgTouchStart(e: React.TouchEvent) {
+    const t = e.changedTouches[0];
+    imgTouchStartXRef.current = t.clientX;
+    imgTouchStartYRef.current = t.clientY;
+    imgTouchStartTimeRef.current = Date.now();
+  }
+  function handleImgTouchEnd(e: React.TouchEvent) {
+    const t = e.changedTouches[0];
+    const startX = imgTouchStartXRef.current ?? t.clientX;
+    const startY = imgTouchStartYRef.current ?? t.clientY;
+    const dx = t.clientX - startX;
+    const dy = t.clientY - startY;
+    const dt = Date.now() - imgTouchStartTimeRef.current;
+    const horizontal = Math.abs(dx) > Math.abs(dy);
+    const distanceOk = Math.abs(dx) > 40;
+    const timeOk = dt < 800;
+    if (horizontal && distanceOk && timeOk && images.length > 0) {
+      if (dx < 0) {
+        nextImage();
+      } else {
+        prevImage();
+      }
+    }
+    imgTouchStartXRef.current = null;
+    imgTouchStartYRef.current = null;
   }
 
   // Remember last selections
@@ -288,6 +325,13 @@ export default function CaptionPage() {
         setIdx(finalCaptions.length - 1); // 跳转到最新文案（数组末尾）
         return finalCaptions;
       });
+      // 首次生成后触发首图（若当前没有图片）
+      try {
+        if (result && result[0] && images.length === 0) {
+          // 不阻塞文案生成的提示
+          void handleGenerateImage(result[0]);
+        }
+      } catch {}
       // Update last 3 opening prefixes with backend-provided opening_prefix first; fallback to header/local extraction
       let pfx = '';
       try {
@@ -311,6 +355,93 @@ export default function CaptionPage() {
     }
   }
 
+  // Generate a new image (max 3). If optionalCaption provided, use it; else use current display.
+  async function handleGenerateImage(optionalCaption?: string) {
+    if (!product) return;
+    if (images.length >= 3) {
+      setHint('图片已达上限（最多3张）');
+      setTimeout(() => setHint(''), 3000);
+      return;
+    }
+    setImgLoading(true);
+    try {
+      const res = await fetch('/api/generate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          product,
+          caption: optionalCaption ?? display,
+          style: styleZh,
+        }),
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`HTTP ${res.status}: ${errorText}`);
+      }
+      const data = await res.json();
+      const url = String((data as any)?.image_url || '');
+      if (url) {
+        setImages(prev => {
+          const next = [...prev, url].slice(0, 3);
+          setImgIdx(next.length - 1);
+          return next;
+        });
+      } else {
+        throw new Error('无有效图片返回');
+      }
+    } catch (e) {
+      console.error('Image generation error:', e);
+      setHint(`生成图片失败: ${(e as Error)?.message || '未知错误'}`);
+      setTimeout(() => setHint(''), 4000);
+    } finally {
+      setImgLoading(false);
+    }
+  }
+
+  const nextImage = () => images.length > 0 && setImgIdx((imgIdx + 1) % images.length);
+  const prevImage = () => images.length > 0 && setImgIdx((imgIdx - 1 + images.length) % images.length);
+
+  async function handleDownloadImage(url: string) {
+    try {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'image.png';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setHint('已触发下载 ✅');
+      setTimeout(() => setHint(''), 2000);
+    } catch {
+      window.open(url, '_blank');
+    }
+  }
+
+  async function handleDownloadText(text: string) {
+    try {
+      const blob = new Blob([text ?? ''], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'caption.txt';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setHint('已下载文案 ✅');
+      setTimeout(() => setHint(''), 2000);
+    } catch (e) {
+      setHint('下载文案失败');
+      setTimeout(() => setHint(''), 2000);
+    }
+  }
+
+  async function handleCopyFullPost(text: string, url?: string) {
+    const full = [text.trim(), url ? `\n\n${url}` : ''].filter(Boolean).join('\n');
+    await handleCopy(full);
+  }
+
+  // 不需要“定稿”，以当前停留的文案与图片为准进行复制/分享
+
   async function handleCopy(text: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -322,10 +453,11 @@ export default function CaptionPage() {
     }
   }
 
-  async function handleShare(text: string) {
+  async function handleShare(text: string, url?: string) {
+    const combined = [text.trim(), url ? `\n\n${url}` : ''].filter(Boolean).join('\n');
     if (navigator.share) {
       try {
-        await navigator.share({ text });
+        await navigator.share({ text: combined });
         setHint('分享成功 ✅');
         setTimeout(() => setHint(''), 2000);
         return;
@@ -336,7 +468,7 @@ export default function CaptionPage() {
     
     // Fallback: copy and open Facebook
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(combined);
       window.open('https://www.facebook.com/', '_blank');
       setHint('已复制并打开 Facebook ✅');
       setTimeout(() => setHint(''), 2000);
@@ -351,19 +483,15 @@ export default function CaptionPage() {
 
   return (
     <>
-      {/* Floating Bubble Navigation */}
-      <div className="nav-rail safe-area-top">
-        <div className="nav-bubble">
-          <div style={{ flex: 1 }} />   {/* 左空 */}
-          <div style={{ flex: 1 }} />   {/* 中空（不要标题） */}
-          <button
-            className="nav-icon"
-            aria-label="Open menu"
-            onClick={() => setMenuOpen(true)}
-          >
-            <div className="nav-hamburger"><div /></div>
-          </button>
-        </div>
+      {/* Top-right hamburger button */}
+      <div>
+        <button
+          className="nav-icon"
+          aria-label="Open menu"
+          onClick={() => setMenuOpen(true)}
+        >
+          <div className="nav-hamburger"><div /></div>
+        </button>
       </div>
 
       <div style={containerStyle} className="safe-area-bottom">
@@ -464,42 +592,41 @@ export default function CaptionPage() {
               exit={{ opacity: 0, y: -30 }}
               transition={{ duration: 0.22 }}
             >
-              {/* Navigation (only when multiple captions) */}
-              {captions.length > 1 && (
-                <div style={navStyle}>
-                  <motion.button
-                    style={navButtonStyle}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={prevCaption}
-                  >
-                    ←
-                  </motion.button>
-                  
-                  <div style={dotsStyle}>
-                    {captions.map((_, i) => (
+              {/* Combined Preview: Image on top (fixed 1080x1350 ≈ 4:5) */}
+              <div style={{ position:'relative', marginBottom: 12 }}>
+                <div
+                  style={{ width: '100%', aspectRatio: '4 / 5', background: '#f3f4f6', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', display:'flex', alignItems:'center', justifyContent:'center' }}
+                  onTouchStart={images.length > 1 ? handleImgTouchStart : undefined}
+                  onTouchEnd={images.length > 1 ? handleImgTouchEnd : undefined}
+                >
+                  {imgLoading && (
+                    <div style={{ color:'#9ca3af', fontSize:13 }}>正在生成图片…</div>
+                  )}
+                  {!imgLoading && images.length > 0 && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={images[imgIdx]} alt="generated" style={{ width:'100%', height:'100%', objectFit:'cover' }} />
+                  )}
+                  {!imgLoading && images.length === 0 && (
+                    <div style={{ color:'#9ca3af', fontSize:13 }}>暂无图片，点击“换图片”生成</div>
+                  )}
+                </div>
+                {/* Image dots only */}
+                {images.length > 1 && (
+                  <div style={{ display:'flex', justifyContent:'center', gap:8, marginTop: 10 }}>
+                    {images.map((_, i) => (
                       <motion.div
                         key={i}
                         className="dot"
-                        style={{
-                          backgroundColor: i === idx ? 'var(--primary)' : '#D1D5DB',
-                        }}
+                        style={{ backgroundColor: i === imgIdx ? 'var(--primary)' : '#D1D5DB' }}
                         whileTap={{ scale: 0.8 }}
-                        onClick={() => setIdx(i)}
+                        onClick={() => setImgIdx(i)}
                       />
                     ))}
                   </div>
+                )}
+              </div>
 
-                  <motion.button
-                    style={navButtonStyle}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={nextCaption}
-                  >
-                    →
-                  </motion.button>
-                </div>
-              )}
-
-              {/* Caption Display */}
+              {/* Caption below image */}
               <div style={captionContainerStyle}>
                 <AnimatePresence mode="wait">
                   <motion.div
@@ -516,30 +643,100 @@ export default function CaptionPage() {
                   </motion.div>
                 </AnimatePresence>
               </div>
+              {/* Caption dots only */}
+              {captions.length > 1 && (
+                <div style={{ display:'flex', justifyContent:'center', gap:8, marginBottom: 10 }}>
+                  {captions.map((_, i) => (
+                    <motion.div
+                      key={i}
+                      className="dot"
+                      style={{ backgroundColor: i === idx ? 'var(--primary)' : '#D1D5DB' }}
+                      whileTap={{ scale: 0.8 }}
+                      onClick={() => setIdx(i)}
+                    />
+                  ))}
+                </div>
+              )}
 
-              {/* Action Buttons */}
-              <div style={actionButtonsStyle}>
-                <motion.button
-                  className="btn-secondary"
-                  whileTap={{ scale: 0.98 }}
-                  whileHover={{ scale: 1.02 }}
-                  onClick={() => handleCopy(display)}
-                >
+              {/* Actions: Main row (换图片 / 换文案 / 更多) */}
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap: 12, marginTop: 8 }}>
+                <motion.button className="btn-premium" whileTap={{ scale: 0.98 }} whileHover={{ scale: 1.02 }} disabled={imgLoading || images.length >= 3 || !product} onClick={() => handleGenerateImage()}>
+                  {images.length >= 3 ? '换图片（已上限）' : `换图片（剩余 ${3 - images.length}）`}
+                </motion.button>
+                <motion.button className="btn-secondary" whileTap={{ scale: 0.98 }} whileHover={{ scale: 1.02 }} onClick={handleGenerate}>
+                  换文案（{captions.length}）
+                </motion.button>
+                <motion.button className="btn-secondary" whileTap={{ scale: 0.98 }} whileHover={{ scale: 1.02 }} onClick={() => setMoreOpen(v => !v)}>
+                  更多
+                </motion.button>
+              </div>
+
+              {/* Actions: Second row (复制 / 分享) */}
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap: 12, marginTop: 8 }}>
+                <motion.button className="btn-secondary" whileTap={{ scale: 0.98 }} whileHover={{ scale: 1.02 }} onClick={() => handleCopyFullPost(display, images[imgIdx])}>
                   复制
                 </motion.button>
-                
-                <motion.button
-                  className="btn-dark"
-                  whileTap={{ scale: 0.98 }}
-                  whileHover={{ scale: 1.02 }}
-                  onClick={() => handleShare(display)}
-                >
+                <motion.button className="btn-dark" whileTap={{ scale: 0.98 }} whileHover={{ scale: 1.02 }} onClick={() => handleShare(display, images[imgIdx])}>
                   分享
                 </motion.button>
+              </div>
+
+              {/* More dropdown: 下载图片 / 下载文案 */}
+              <div style={{ marginTop: 8, position:'relative' }}>
+                {moreOpen && (
+                  <div
+                    style={{
+                      position:'absolute',
+                      zIndex: 40,
+                      right: 0,
+                      top: 'calc(100% + 8px)',
+                      background:'#ffffff',
+                      color:'var(--text)',
+                      border:'1px solid var(--border)',
+                      borderRadius: 12,
+                      padding: 8,
+                      boxShadow:'0 8px 24px rgba(0,0,0,.12)',
+                      minWidth: 180,
+                      maxWidth: 'min(80vw, 260px)'
+                    }}
+                  >
+                    <motion.button
+                      className="menu-item"
+                      whileHover={{ backgroundColor: '#f3f4f6' }}
+                      style={{
+                        display:'block', width:'100%', textAlign:'left',
+                        background:'#fff', color:'var(--text)',
+                        padding:'10px 12px', border:'1px solid var(--border)', borderRadius:10, fontSize:14,
+                        cursor:'pointer'
+                      }}
+                      onClick={() => { setMoreOpen(false); handleDownloadText(display); }}
+                    >
+                      下载文案
+                    </motion.button>
+                    <div style={{ height:8 }} />
+                    <motion.button
+                      className="menu-item"
+                      whileHover={images.length === 0 ? {} : { backgroundColor: '#f3f4f6' }}
+                      style={{
+                        display:'block', width:'100%', textAlign:'left',
+                        background:'#fff', color:'var(--text)',
+                        padding:'10px 12px', border:'1px solid var(--border)', borderRadius:10, fontSize:14,
+                        opacity: images.length === 0 ? 0.5 : 1,
+                        cursor: images.length === 0 ? 'not-allowed' : 'pointer'
+                      }}
+                      disabled={images.length === 0}
+                      onClick={() => { setMoreOpen(false); if (images[imgIdx]) handleDownloadImage(images[imgIdx]); }}
+                    >
+                      下载图片
+                    </motion.button>
+                  </div>
+                )}
               </div>
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Image Results merged into combined card above */}
 
         {/* Status Message */}
         <AnimatePresence>
