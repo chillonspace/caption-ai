@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 export default function AdminBillingPage() {
   const [token, setToken] = useState<string | null>(null);
   const [email, setEmail] = useState('');
+  const [phoneNew, setPhoneNew] = useState('');
   const [status, setStatus] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState<any[]>([]);
@@ -45,6 +46,35 @@ export default function AdminBillingPage() {
       } else {
         setStatus(JSON.stringify(json));
       }
+    } catch (e: any) {
+      setStatus(`❌ 错误: ${e.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function updateUserPhone() {
+    if (!email.trim()) {
+      setStatus('❌ 错误: 请输入邮箱');
+      return;
+    }
+    setLoading(true);
+    setStatus('');
+    try {
+      const res = await fetch('/api/admin/user-phone', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-admin-token': token || '',
+        },
+        body: JSON.stringify({ email, phone: phoneNew.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || 'Request failed');
+
+      // 同步更新列表中的该用户手机号
+      setUsers(prev => prev.map(u => u.email === email ? { ...u, phone: phoneNew.trim() } : u));
+      setStatus(`✅ 已更新手机号: ${email} → ${phoneNew.trim() || '-'}`);
     } catch (e: any) {
       setStatus(`❌ 错误: ${e.message}`);
     } finally {
@@ -151,6 +181,23 @@ export default function AdminBillingPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 style={{ width: '100%' }}
               />
+              <div style={{ height: 12 }} />
+              <label style={{ 
+                display: 'block', 
+                fontSize: '14px', 
+                fontWeight: '500',
+                color: 'var(--text)',
+                marginBottom: '8px' 
+              }}>
+                手机号码（国际区号纯数字）
+              </label>
+              <input
+                className="input-login"
+                placeholder="如 60123456789"
+                value={phoneNew}
+                onChange={(e) => setPhoneNew(e.target.value)}
+                style={{ width: '100%' }}
+              />
             </div>
 
             <div style={{ 
@@ -179,6 +226,13 @@ export default function AdminBillingPage() {
                 onClick={() => callAPI({ email, active: false })}
               >
                 {loading ? '...' : '设为未激活'}
+              </button>
+              <button 
+                className="btn-secondary"
+                disabled={loading || !email.trim()}
+                onClick={updateUserPhone}
+              >
+                {loading ? '...' : '更新手机号'}
               </button>
               <button
                 className="btn-secondary"
@@ -300,7 +354,7 @@ export default function AdminBillingPage() {
                       color: 'var(--text)',
                       borderBottom: '1px solid var(--border)',
                       width: '8%'
-                    }}>手机</th>
+                    }}>手机号</th>
                     <th style={{ 
                       textAlign: 'center', 
                       padding: '12px 6px',
@@ -385,10 +439,10 @@ export default function AdminBillingPage() {
                       <td style={{ 
                         padding: '12px 6px',
                         fontSize: '12px',
-                        color: 'var(--text-muted)',
+                        color: 'var(--text)',
                         borderBottom: '1px solid var(--divider)',
                         textAlign: 'center'
-                      }}>{u.phone ? '有' : '-'}</td>
+                      }}>{u.phone || '-'}</td>
                       <td style={{ 
                         padding: '12px 6px',
                         fontSize: '12px',

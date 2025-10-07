@@ -47,6 +47,7 @@ export async function POST(req: NextRequest) {
   try {
     // 验证用户登录状态 + 使用统计（S1）
     let userEmail: string | null = null;
+    let userPhoneWaNumber: string | null = null;
     try {
       const sb = createServer();
       const { data: { user } } = await sb.auth.getUser();
@@ -54,6 +55,23 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
       }
       userEmail = user.email;
+      // 读取用户手机号并规范化为 wa.me 需要的国际区号纯数字
+      try {
+        const rawPhone = String(((user as any)?.user_metadata?.phone) || '').trim();
+        const digits = rawPhone.replace(/\D/g, '');
+        if (digits) {
+          if (digits.startsWith('0') && !digits.startsWith('60')) {
+            userPhoneWaNumber = `60${digits.slice(1)}`;
+          } else if (digits.startsWith('60')) {
+            userPhoneWaNumber = digits;
+          } else {
+            userPhoneWaNumber = digits;
+          }
+        }
+        if (userPhoneWaNumber && userPhoneWaNumber.length < 6) {
+          userPhoneWaNumber = null;
+        }
+      } catch {}
       await recordUsage(user.email);
     } catch (e: any) {
       return NextResponse.json({ error: 'Request failed', detail: `S1: ${String(e?.message || e)}` }, { status: 500 });
@@ -813,8 +831,10 @@ AirVo 外用舒缓，
         const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
         const usedStyleChinese = styleMapping[styleKey] || styleKey;
         try { (globalThis as any).__incMonthlyCaption?.(); } catch {}
+        const origin = req.nextUrl.origin;
+        const code = String(userPhoneWaNumber || '');
         return new NextResponse(
-          JSON.stringify({ captions: retryQuick.finalCaptions, used_style: usedStyleChinese }),
+          JSON.stringify({ captions: (userPhoneWaNumber ? retryQuick.finalCaptions.map(s => `${String(s||'').trim()}\n\n有兴趣PM：${origin}/w/${code}`) : retryQuick.finalCaptions), used_style: usedStyleChinese }),
           { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
         );
       }
@@ -830,8 +850,10 @@ AirVo 外用舒缓，
         const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
         const usedStyleChinese = styleMapping[styleKey] || styleKey;
         try { (globalThis as any).__incMonthlyCaption?.(); } catch {}
+        const origin = req.nextUrl.origin;
+        const code = String(userPhoneWaNumber || '');
         return new NextResponse(
-          JSON.stringify({ captions: [local], used_style: usedStyleChinese }),
+          JSON.stringify({ captions: (userPhoneWaNumber ? [ `${String(local||'').trim()}\n\n有兴趣PM：${origin}/w/${code}` ] : [local]), used_style: usedStyleChinese }),
           { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
         );
       }
@@ -847,8 +869,10 @@ AirVo 外用舒缓，
         const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
         const usedStyleChinese = styleMapping[styleKey] || styleKey;
         try { (globalThis as any).__incMonthlyCaption?.(); } catch {}
+        const origin = req.nextUrl.origin;
+        const code = String(userPhoneWaNumber || '');
         return new NextResponse(
-          JSON.stringify({ captions: first.finalCaptions, used_style: usedStyleChinese }),
+          JSON.stringify({ captions: (userPhoneWaNumber ? first.finalCaptions.map(s => `${String(s||'').trim()}\n\n有兴趣PM：${origin}/w/${code}`) : first.finalCaptions), used_style: usedStyleChinese }),
           { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
         );
         }
@@ -867,8 +891,10 @@ AirVo 外用舒缓，
           const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
           const usedStyleChinese = styleMapping[styleKey] || styleKey;
           try { (globalThis as any).__incMonthlyCaption?.(); } catch {}
+          const origin = req.nextUrl.origin;
+          const code = String(userPhoneWaNumber || '');
           return new NextResponse(
-            JSON.stringify({ captions: quick.finalCaptions, used_style: usedStyleChinese }),
+            JSON.stringify({ captions: (userPhoneWaNumber ? quick.finalCaptions.map(s => `${String(s||'').trim()}\n\n有兴趣PM：${origin}/w/${code}`) : quick.finalCaptions), used_style: usedStyleChinese }),
             { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
           );
         }
@@ -878,8 +904,10 @@ AirVo 外用舒缓，
           const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
           const usedStyleChinese = styleMapping[styleKey] || styleKey;
           try { (globalThis as any).__incMonthlyCaption?.(); } catch {}
+          const origin = req.nextUrl.origin;
+          const code = String(userPhoneWaNumber || '');
           return new NextResponse(
-            JSON.stringify({ captions: [local2], used_style: usedStyleChinese }),
+            JSON.stringify({ captions: (userPhoneWaNumber ? [ `${String(local2||'').trim()}\n\n有兴趣PM：${origin}/w/${code}` ] : [local2]), used_style: usedStyleChinese }),
             { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
           );
         }
@@ -890,8 +918,10 @@ AirVo 外用舒缓，
         const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
         const usedStyleChinese = styleMapping[styleKey] || styleKey;
         try { (globalThis as any).__incMonthlyCaption?.(); } catch {}
+        const origin = req.nextUrl.origin;
+        const code = String(userPhoneWaNumber || '');
         return new NextResponse(
-          JSON.stringify({ captions: second.finalCaptions, used_style: usedStyleChinese }),
+          JSON.stringify({ captions: (userPhoneWaNumber ? second.finalCaptions.map(s => `${String(s||'').trim()}\n\n有兴趣PM：${origin}/w/${code}`) : second.finalCaptions), used_style: usedStyleChinese }),
           { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, max-age=0' } }
         );
       }
@@ -903,8 +933,10 @@ AirVo 外用舒缓，
       const styleMapping: Record<string, string> = { story: '故事', pain: '痛点', daily: '日常', tech: '技术', promo: '促销' };
       const usedStyleChinese = styleMapping[styleKey] || styleKey;
       try { (globalThis as any).__incMonthlyCaption?.(); } catch {}
+      const origin = req.nextUrl.origin;
+      const code = String(userPhoneWaNumber || '');
       return new NextResponse(
-        JSON.stringify({ captions: first.finalCaptions, used_style: usedStyleChinese }),
+        JSON.stringify({ captions: (userPhoneWaNumber ? first.finalCaptions.map(s => `${String(s||'').trim()}\n\n有兴趣PM：${origin}/w/${code}`) : first.finalCaptions), used_style: usedStyleChinese }),
         { status: 200, headers: { 
           'Content-Type': 'application/json', 
           'Cache-Control': 'no-store, max-age=0'
