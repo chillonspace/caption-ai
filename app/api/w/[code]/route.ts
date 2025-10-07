@@ -15,12 +15,9 @@ function normalizeMsisdn(raw: string): string | null {
   return digits;
 }
 
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: { code: string } }
-) {
+export async function GET(req: NextRequest, context: any) {
   try {
-    const code = String(params?.code || '').trim();
+    const code = String(context?.params?.code || '').trim();
     if (!code) return NextResponse.json({ error: 'Invalid code' }, { status: 400 });
 
     // If param itself looks like a phone number, use directly
