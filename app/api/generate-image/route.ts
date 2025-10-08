@@ -177,15 +177,28 @@ export async function POST(req: NextRequest) {
       return null;
     }
 
-    const falResult = await tryFal();
-    if (falResult) {
-      try { (globalThis as any).__incMonthlyImage?.(); } catch {}
-      return NextResponse.json(falResult, { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } });
-    }
-    const staResult = await tryStability();
-    if (staResult) {
-      try { (globalThis as any).__incMonthlyImage?.(); } catch {}
-      return NextResponse.json(staResult, { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } });
+    // Provider selection: IMAGE_PROVIDER=stability|fal|auto (default: auto)
+    const providerPref = String(process.env.IMAGE_PROVIDER || 'auto').toLowerCase();
+    const tryOrder = providerPref === 'stability'
+      ? ['stability', 'fal']
+      : providerPref === 'fal'
+      ? ['fal', 'stability']
+      : ['fal', 'stability'];
+
+    for (const p of tryOrder) {
+      if (p === 'stability') {
+        const staResult = await tryStability();
+        if (staResult) {
+          try { (globalThis as any).__incMonthlyImage?.(); } catch {}
+          return NextResponse.json(staResult, { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } });
+        }
+      } else if (p === 'fal') {
+        const falResult = await tryFal();
+        if (falResult) {
+          try { (globalThis as any).__incMonthlyImage?.(); } catch {}
+          return NextResponse.json(falResult, { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } });
+        }
+      }
     }
 
     // 占位图兜底
