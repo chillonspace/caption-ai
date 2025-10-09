@@ -13,26 +13,26 @@ type Aspect = '1:1' | '9:16' | '4:5';
 
 // Advertising style pool for diversity (5 styles)
 const AD_STYLES: Record<string, string> = {
-  beauty_red: 'beauty portrait with red background, studio light, elegant typography',
-  lifestyle_white: 'lifestyle scene with white bright background, natural light, morning mood',
-  flatlay_wood: 'top-down flatlay on wooden surface with props like cup, plants, magazine',
-  scientific_lab: 'technical laboratory setting, glass beakers, subtle light reflections',
-  herbal_nature: 'natural background with herbal leaves, green tone, clean minimalist layout',
+  beauty_red: '红色背景的美妆肖像，棚拍光，优雅中文字体',
+  lifestyle_white: '生活方式场景，白色明亮背景，自然晨光',
+  flatlay_wood: '木质桌面俯拍摆拍，搭配杯子、绿植、杂志等道具',
+  scientific_lab: '理科实验室氛围，玻璃烧杯与微弱高光反射',
+  herbal_nature: '自然草本背景，绿色色调，极简干净排版',
 };
 
 const PROMPT_TEMPLATE = `
-High-quality commercial poster for {{product_name}}.
-Use the provided product image exactly as it is — do NOT redraw, repaint, or modify the product in any way.
-The original product must appear clearly, front-facing, fully visible, with label readable.
+为「{{product_name}}」生成高品质商业广告图。
+必须使用提供的产品图片作为主体，禁止重绘、替换或修改瓶身与标签。
+产品需完整正面、清晰可见，标签可读。
 
-Design a professional advertising photo in {{style_desc}}, inspired by modern health and skincare ads.
-Add large, elegant Chinese promotional text (主标题、功效、卖点) integrated naturally with the design, matching the scene tone.
+画面风格：{{style_desc}}；灵感来自现代健康/护肤广告。
+在画面中自然融入大号中文文案（主标题、核心功效、卖点），与场景气质一致。
 
-Scene must look realistic, aesthetic, premium, clean background, soft light, suitable for online ads.
-brand-safe, compliant, no medical or exaggerated claims.
+画面真实、审美高级、干净背景、柔和光线，适合线上投放；
+注意品牌安全与合规，不夸大效果。
 `;
 
-const NEGATIVE_PROMPT = `missing product, fake bottle, distorted label, cropped product, bad hands, messy background, too dark, wrong text, watermark, nsfw, low quality`;
+const NEGATIVE_PROMPT = `没有产品, 假瓶, 标签变形, 裁切产品, 手部畸形, 杂乱背景, 过暗, 错误文字, 水印, 低质量, NSFW`;
 
 function mapAspect(aspect: Aspect | string | undefined) {
   const a = (aspect || '4:5') as Aspect;
@@ -152,176 +152,65 @@ export async function POST(req: NextRequest) {
       + (caption ? `\n${caption}` : '')
     ).trim();
 
-    const STABILITY_API_KEY = (process.env.STABILITY_API_KEY || '').trim();
-
-    // 45s 超时控制（Stability 有时需要更久）
+    // 45s 超时控制
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 45000);
-
-    // Removed fal provider for simplicity and determinism (must use Stability with init image)
-
-    // Provider 2: Stability（若提供 STABILITY_API_KEY）
-    let lastStabilityError: string | undefined;
-    async function tryStabilityWithInitImage() {
-      if (!STABILITY_API_KEY) return null;
+    // Zhipu CogView-4 generations only (Plan B)
+    let lastZhipuError: string | undefined;
+    async function tryZhipuGenerations() {
+      const key = (process.env.ZHIPU_API_KEY || '').trim();
+      if (!key) { lastZhipuError = 'missing ZHIPU_API_KEY'; return null; }
       try {
-        // 尝试使用 public/products 下的参考图作为初始图
-        const mapName = (p: string): string => {
-          const k = (p || '').toLowerCase();
-          if (k.includes('tri') && k.includes('guard')) return 'triguard';
-          if (k.includes('flo')) return 'flomix';
-          if (k.includes('flex')) return 'flexa';
-          if (k.includes('air')) return 'airvo';
-          if (k.includes('trio') && k.includes('care')) return 'triocare';
-          return '';
-        };
-        const fileKey = mapName(product);
-        if (!fileKey) return null;
-        const filePath = path.join(process.cwd(), 'public', 'products', `${fileKey}.png`);
-        if (!fs.existsSync(filePath)) return null;
-
-        const form = new FormData();
-        form.append('image', new Blob([fs.readFileSync(filePath)]), `${fileKey}.png`);
-        form.append('prompt', prompt);
-        form.append('output_format', 'png');
-        form.append('width', String(width));
-        form.append('height', String(height));
-        // Optional negative prompt field for Stability edit endpoint
-        try { (form as any).append('negative_prompt', NEGATIVE_PROMPT); } catch {}
-
-        const res = await fetch('https://api.stability.ai/v2beta/stable-image/edit', {
+        const payload = {
+          model: 'cogview-4',
+          prompt: `${prompt}\n产品必须保持原样，不可重绘。画面为广告海报，添加中文标题、卖点文字，干净高质感背景。`,
+          size: `${width}x${height}`,
+          seed: seed || Math.floor(Math.random() * 999999).toString(),
+        } as const;
+        const res = await fetch('https://open.bigmodel.cn/api/paas/v4/images/generations', {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${STABILITY_API_KEY}`,
-            'Accept': 'image/*',
+            'Authorization': `Bearer ${key}`,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
           },
-          body: form,
+          body: JSON.stringify(payload),
           signal: controller.signal,
         });
         if (!res.ok) {
-          try { lastStabilityError = `init ${res.status} ${await res.text()}`; } catch {}
+          try { lastZhipuError = `gen ${res.status} ${await res.text()}`; } catch {}
           return null;
         }
-        const arrayBuf = await res.arrayBuffer();
-        const base64 = Buffer.from(arrayBuf).toString('base64');
-        const dataUrl = `data:image/png;base64,${base64}`;
+        const data: any = await res.json();
+        const url = data?.data?.[0]?.url || data?.data?.[0]?.image_url || '';
+        if (!url) { lastZhipuError = 'no url in response'; return null; }
         clearTimeout(timeoutId);
-        return { image_url: dataUrl, provider: 'stability', seed: seed || '' } as const;
-      } catch (e: any) { lastStabilityError = `init err ${String(e?.message || e)}`; }
-      return null;
-    }
-    async function tryStability() {
-      if (!STABILITY_API_KEY) return null;
-      try {
-        const form = new FormData();
-        form.append('prompt', prompt);
-        form.append('output_format', 'png');
-        form.append('width', String(width));
-        form.append('height', String(height));
-        if (seed) form.append('seed', seed);
-        try { (form as any).append('negative_prompt', NEGATIVE_PROMPT); } catch {}
-
-        const res = await fetch('https://api.stability.ai/v2beta/stable-image/generate/core', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${STABILITY_API_KEY}`,
-            'Accept': 'image/*',
-          },
-          body: form,
-          signal: controller.signal,
-        });
-        if (!res.ok) {
-          try { lastStabilityError = `core ${res.status} ${await res.text()}`; } catch {}
-          return null;
-        }
-        // v2beta 返回的是二进制图片；为简化直接用 data URL 承载
-        const arrayBuf = await res.arrayBuffer();
-        const base64 = Buffer.from(arrayBuf).toString('base64');
-        const dataUrl = `data:image/png;base64,${base64}`;
-        clearTimeout(timeoutId);
-        return { image_url: dataUrl, provider: 'stability', seed: seed || '' } as const;
-      } catch (e: any) { lastStabilityError = `core err ${String(e?.message || e)}`; }
-      return null;
-    }
-
-    // If we have a local reference image and Stability key, prioritize init-image path first
-    try {
-      const initFirst = await tryStabilityWithInitImage();
-      if (initFirst) {
-        try { (globalThis as any).__incMonthlyImage?.(); } catch {}
-        const disk = await (async () => { try { return await persistToDisk(initFirst.image_url, { desiredW: 1080, desiredH: 1350 }); } catch { return { saved_path: '', thumb_path: '' } as const; } })();
-        return NextResponse.json(
-          { ...initFirst, ...disk, aspect: '4:5' },
-          { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } }
-        );
+        return { image_url: url as string, provider: 'zhipu', seed: String(payload.seed) } as const;
+      } catch (e: any) {
+        lastZhipuError = String(e?.message || e);
+        return null;
       }
-    } catch {}
-
-    // Strict path: must use Stability with init image; fail fast otherwise
-    // Preconditions
-    if (!STABILITY_API_KEY) {
-      clearTimeout(timeoutId);
-      return NextResponse.json({ error: 'MISSING_STABILITY_KEY', detail: '请在环境变量配置 STABILITY_API_KEY' }, { status: 500 });
-    }
-    const mapNameStrict = (p: string): string => {
-      const k = (p || '').toLowerCase();
-      if (k.includes('tri') && k.includes('guard')) return 'triguard';
-      if (k.includes('flo')) return 'flomix';
-      if (k.includes('flex')) return 'flexa';
-      if (k.includes('air')) return 'airvo';
-      if (k.includes('trio') && k.includes('care')) return 'triocare';
-      return '';
-    };
-    const strictKey = mapNameStrict(product);
-    if (!strictKey) {
-      clearTimeout(timeoutId);
-      return NextResponse.json({ error: 'INVALID_PRODUCT', detail: '产品名未匹配到参考图（TriGuard/FloMix/FleXa/AirVo/TrioCare）' }, { status: 400 });
-    }
-    const strictFilePath = path.join(process.cwd(), 'public', 'products', `${strictKey}.png`);
-    if (!fs.existsSync(strictFilePath)) {
-      clearTimeout(timeoutId);
-      return NextResponse.json({ error: 'MISSING_REFERENCE_IMAGE', detail: `/public/products/${strictKey}.png 不存在` }, { status: 400 });
     }
 
-    const staInit = await tryStabilityWithInitImage();
-    if (staInit) {
+    const zh = await tryZhipuGenerations();
+    if (zh) {
       try { (globalThis as any).__incMonthlyImage?.(); } catch {}
-      const disk = await persistToDisk(staInit.image_url, { desiredW: 1080, desiredH: 1350 });
+      const disk = await persistToDisk(zh.image_url, { desiredW: 1080, desiredH: 1350 });
       return NextResponse.json(
         {
-          ...staInit,
+          ...zh,
           image_url: disk.saved_path,
           ...disk,
           aspect: '4:5',
           used_prompt: prompt,
           ad_style_key: adStyleKey,
-          used_endpoint: 'edit',
-          reference_image: `/products/${strictKey}.png`,
-        },
-        { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } }
-      );
-    }
-    // Try once more with core endpoint as a backup (still Stability)
-    const staBackup = await tryStability();
-    if (staBackup) {
-      try { (globalThis as any).__incMonthlyImage?.(); } catch {}
-      const disk = await persistToDisk(staBackup.image_url, { desiredW: 1080, desiredH: 1350 });
-      return NextResponse.json(
-        {
-          ...staBackup,
-          image_url: disk.saved_path,
-          ...disk,
-          aspect: '4:5',
-          used_prompt: prompt,
-          ad_style_key: adStyleKey,
-          used_endpoint: 'core',
-          reference_image: `/products/${strictKey}.png`,
+          product_name: product,
         },
         { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } }
       );
     }
     clearTimeout(timeoutId);
-    return NextResponse.json({ error: 'STABILITY_EDIT_FAILED', detail: lastStabilityError || '使用参考图生成失败，请稍后重试' }, { status: 502 });
+    return NextResponse.json({ error: 'ZH_GENERATE_FAILED', detail: lastZhipuError || '智谱生成失败，请稍后重试' }, { status: 502 });
 
     // Helper: persist to public/generated and create 540x675 thumbnail
     async function persistToDisk(input: string | Buffer, opts: { desiredW: number; desiredH: number }) {
