@@ -9,6 +9,15 @@ export const PRODUCTS = ['AirVo', 'TriGuard', 'FloMix', 'TrioCare', 'FleXa'] as 
 export const PLATFORMS = ['Facebook'] as const;
 export const STYLE_OPTIONS_ZH = ['随机', '故事', '痛点', '日常', '技术', '促销'] as const;
 
+// Product assets mapping (public paths)
+export const PRODUCT_ASSETS = {
+  AirVo: '/products/airvo.png',
+  TriGuard: '/products/triguard.png',
+  FloMix: '/products/flomix.png',
+  TrioCare: '/products/triocare.png',
+  FleXa: '/products/flexa.png',
+} as const;
+
 // Response Messages
 export const ERROR_MESSAGES = {
   UNAUTHORIZED: 'Unauthorized',

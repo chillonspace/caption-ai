@@ -475,25 +475,43 @@ export default function CaptionPage() {
   }
 
   async function handleShare(text: string, url?: string) {
-    const combined = [text.trim(), url ? `\n\n${url}` : ''].filter(Boolean).join('\n');
-    if (navigator.share) {
+    const message = String(text ?? '').trim();
+
+    // If a URL is provided, open Facebook sharer with the link and quote
+    if (url) {
+      const shareUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}&quote=${encodeURIComponent(message)}`;
       try {
-        await navigator.share({ text: combined });
-        setHint('分享成功 ✅');
+        window.open(shareUrl, '_blank', 'noopener,noreferrer');
+        setHint('已打开 Facebook 分享 ✅');
         setTimeout(() => setHint(''), 2000);
-        return;
-      } catch (e) {
-        // User cancelled or error
+      } catch {
+        setHint('无法打开 Facebook 分享');
+        setTimeout(() => setHint(''), 2000);
       }
+      return;
     }
-    
-    // Fallback: copy and open Facebook
+
+    // No URL: copy the message and open Facebook home for manual paste
     try {
-      await navigator.clipboard.writeText(combined);
-      window.open('https://www.facebook.com/', '_blank');
-      setHint('已复制并打开 Facebook ✅');
+      if (window.isSecureContext && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(message);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = message;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+    } catch {}
+
+    try {
+      window.open('https://www.facebook.com/', '_blank', 'noopener,noreferrer');
+      setHint('已复制，打开 Facebook 后请粘贴 ✅');
       setTimeout(() => setHint(''), 2000);
-    } catch (e) {
+    } catch {
       setHint('分享失败');
       setTimeout(() => setHint(''), 2000);
     }

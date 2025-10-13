@@ -5,6 +5,7 @@ import path from 'path';
 import Stripe from 'stripe';
 import { getEnv } from '@/lib/admin-utils';
 import sharp from 'sharp';
+import { PRODUCT_ASSETS } from '@/lib/constants';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -155,26 +156,25 @@ export async function POST(req: NextRequest) {
     // 45s 超时控制
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 45000);
-    // Zhipu CogView-4 generations only (Plan B)
+    // Zhipu CogView-4 generations (user-specified)
     let lastZhipuError: string | undefined;
     async function tryZhipuGenerations() {
-      const key = (process.env.ZHIPU_API_KEY || '').trim();
+      const key = process.env.ZHIPU_API_KEY;
       if (!key) { lastZhipuError = 'missing ZHIPU_API_KEY'; return null; }
       try {
-        const payload = {
+        const body = {
           model: 'cogview-4',
-          prompt: `${prompt}\n产品必须保持原样，不可重绘。画面为广告海报，添加中文标题、卖点文字，干净高质感背景。`,
-          size: `${width}x${height}`,
+          prompt: `${prompt}\n产品必须保持原样，不可重绘。生成中文广告海报，添加中文标题与卖点，干净高质感背景。`,
+          size: '1080x1350',
           seed: seed || Math.floor(Math.random() * 999999).toString(),
         } as const;
         const res = await fetch('https://open.bigmodel.cn/api/paas/v4/images/generations', {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${key}`,
+            Authorization: `Bearer ${key}`,
             'Content-Type': 'application/json',
-            'Accept': 'application/json',
           },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(body),
           signal: controller.signal,
         });
         if (!res.ok) {
@@ -182,10 +182,10 @@ export async function POST(req: NextRequest) {
           return null;
         }
         const data: any = await res.json();
-        const url = data?.data?.[0]?.url || data?.data?.[0]?.image_url || '';
+        const url = data?.data?.[0]?.url;
         if (!url) { lastZhipuError = 'no url in response'; return null; }
         clearTimeout(timeoutId);
-        return { image_url: url as string, provider: 'zhipu', seed: String(payload.seed) } as const;
+        return { image_url: url as string, provider: 'zhipu', seed: String(body.seed) } as const;
       } catch (e: any) {
         lastZhipuError = String(e?.message || e);
         return null;
@@ -195,7 +195,13 @@ export async function POST(req: NextRequest) {
     const zh = await tryZhipuGenerations();
     if (zh) {
       try { (globalThis as any).__incMonthlyImage?.(); } catch {}
-      const disk = await persistToDisk(zh.image_url, { desiredW: 1080, desiredH: 1350 });
+      const bgBuf = await fetch(zh.image_url).then(r => r.arrayBuffer()).then(b => Buffer.from(b));
+      const assetPath = (PRODUCT_ASSETS as any)?.[product as keyof typeof PRODUCT_ASSETS];
+      const composed = assetPath
+        ? await compositeProductRandom(bgBuf, path.join(process.cwd(), 'public', assetPath))
+        : bgBuf;
+      const withText = caption ? await overlayAdText(composed, caption) : composed;
+      const disk = await persistToDisk(withText, { desiredW: 1080, desiredH: 1350 });
       return NextResponse.json(
         {
           ...zh,
@@ -205,6 +211,7 @@ export async function POST(req: NextRequest) {
           used_prompt: prompt,
           ad_style_key: adStyleKey,
           product_name: product,
+          provider: 'zhipu',
         },
         { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } }
       );
@@ -249,6 +256,48 @@ export async function POST(req: NextRequest) {
         saved_path: `/generated/${mainName}`,
         thumb_path: `/generated/${thumbName}`,
       } as const;
+    }
+
+    async function compositeProductRandom(bgBuf: Buffer, productAbsPath: string) {
+      const meta = await sharp(bgBuf).metadata();
+      const W = meta.width || 1080; const H = meta.height || 1350;
+      const anchors = [
+        { x: 0.5, y: 0.75 },
+        { x: 0.25, y: 0.7 }, { x: 0.75, y: 0.7 },
+        { x: 0.5, y: 0.6 },
+        { x: 0.2, y: 0.55 }, { x: 0.8, y: 0.55 },
+        { x: 0.5, y: 0.5 },
+      ];
+      const a = anchors[Math.floor(Math.random() * anchors.length)];
+      const jitterX = (Math.random() - 0.5) * 0.12;
+      const jitterY = (Math.random() - 0.5) * 0.10;
+      const scale = 0.45 + Math.random() * 0.2;
+      const targetW = Math.floor(W * scale);
+      const productBuf = await sharp(productAbsPath).resize(targetW).png().toBuffer();
+      const prodMeta = await sharp(productBuf).metadata();
+      const pw = prodMeta.width || targetW; const ph = prodMeta.height || Math.floor(targetW * 1.2);
+      const margin = Math.floor(W * 0.04);
+      let left = Math.floor(a.x * W - pw / 2 + jitterX * W);
+      let top = Math.floor(a.y * H - ph / 2 + jitterY * H);
+      left = Math.max(margin, Math.min(W - pw - margin, left));
+      top = Math.max(margin, Math.min(H - ph - margin, top));
+      return await sharp(bgBuf).composite([{ input: productBuf, left, top }]).png().toBuffer();
+    }
+
+    async function overlayAdText(buf: Buffer, caption: string) {
+      const meta = await sharp(buf).metadata();
+      const W = meta.width || 1080; const H = meta.height || 1350;
+      const firstLine = String(caption).split('\n').map(s=>s.trim()).find(Boolean) || '';
+      const short = firstLine.slice(0, 22);
+      if (!short) return buf;
+      const x = Math.floor(W * (0.08 + Math.random() * 0.12));
+      const y = Math.floor(H * (0.12 + Math.random() * 0.1));
+      const bgW = Math.min(W - x * 2, short.length * 28 + 24);
+      const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+        <rect x="${x-12}" y="${y-36}" rx="8" ry="8" width="${bgW}" height="44" fill="rgba(0,0,0,0.35)"/>
+        <text x="${x}" y="${y}" font-size="28" fill="#fff" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, 'PingFang SC', 'Microsoft YaHei'">${short.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</text>
+      </svg>`;
+      return await sharp(buf).composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).png().toBuffer();
     }
 
     // Unreachable under normal conditions due to early returns above
