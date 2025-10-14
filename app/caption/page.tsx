@@ -618,8 +618,8 @@ export default function CaptionPage() {
           <div style={dividerStyle} />
         </motion.div>
 
-        {/* Loading Skeleton */}
-        {loading && (
+        {/* Loading Skeleton: only when first time (no captions yet) */}
+        {loading && captions.length === 0 && (
           <motion.div
             style={cardStyle}
             initial={{ opacity: 0, y: 20 }}
@@ -639,9 +639,9 @@ export default function CaptionPage() {
           </motion.div>
         )}
 
-        {/* Results */}
+        {/* Results - keep showing even when loading new caption */}
         <AnimatePresence>
-          {captions.length > 0 && !loading && (
+          {captions.length > 0 && (
             <motion.div
               style={cardStyle}
               initial={{ opacity: 0, y: 30 }}
