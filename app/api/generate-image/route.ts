@@ -310,4 +310,32 @@ export async function POST(req: NextRequest) {
 }
 
 
+// Allow CORS preflight and simple GET checks to avoid 405 on direct visits
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: {
+      'Allow': 'POST, OPTIONS, GET',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Allow-Origin': '*',
+    },
+  });
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    return NextResponse.json(
+      { ok: true, message: 'Use POST to generate image' },
+      { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } }
+    );
+  } catch (err: unknown) {
+    return NextResponse.json(
+      { error: 'Request failed', detail: (err as Error)?.message ?? String(err) },
+      { status: 500 }
+    );
+  }
+}
+
+
 
