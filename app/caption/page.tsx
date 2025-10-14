@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { motion, AnimatePresence } from 'framer-motion';
+import { PRODUCT_ASSETS } from '@/lib/constants';
 
 const PRODUCTS = ['AirVo', 'TriGuard', 'FloMix', 'TrioCare', 'FleXa'];
 const STYLE_OPTIONS_ZH = ['随机', '故事', '痛点', '日常', '技术', '促销'] as const;
@@ -386,30 +387,19 @@ export default function CaptionPage() {
     }
     setImgLoading(true);
     try {
-      const qs = new URLSearchParams({ product });
-      const res = await fetch(`/api/generate-image?${qs.toString()}`, {
-        method: 'GET',
-        headers: { 'Cache-Control': 'no-store' },
+      const assetPath = (PRODUCT_ASSETS as any)?.[product as keyof typeof PRODUCT_ASSETS] || '/products/airvo.png';
+      const url = assetPath;
+      setImages(prev => {
+        const next = [...prev, url].slice(0, 3);
+        setImgIdx(next.length - 1);
+        return next;
       });
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`HTTP ${res.status}: ${errorText}`);
-      }
-      const data = await res.json();
-      const url = String((data as any)?.image_url || '');
-      if (url) {
-        setImages(prev => {
-          const next = [...prev, url].slice(0, 3);
-          setImgIdx(next.length - 1);
-          return next;
-        });
-      } else {
-        throw new Error('无有效图片返回');
-      }
+      setHint('已使用产品图 ✅');
+      setTimeout(() => setHint(''), 1500);
     } catch (e) {
       console.error('Image generation error:', e);
-      setHint(`生成图片失败: ${(e as Error)?.message || '未知错误'}`);
-      setTimeout(() => setHint(''), 4000);
+      setHint('生成图片失败');
+      setTimeout(() => setHint(''), 3000);
     } finally {
       setImgLoading(false);
     }
