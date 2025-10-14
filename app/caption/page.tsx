@@ -416,7 +416,7 @@ export default function CaptionPage() {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      setHint('已触发下载 ✅');
+      setHint('下载图片成功！✅');
       setTimeout(() => setHint(''), 2000);
     } catch {
       window.open(url, '_blank');
@@ -432,7 +432,7 @@ export default function CaptionPage() {
 
   // 不需要“定稿”，以当前停留的文案与图片为准进行复制/分享
 
-  async function handleCopy(text: string) {
+  async function handleCopy(text: string, okMsg?: string) {
     try {
       if (window.isSecureContext && navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
@@ -446,7 +446,7 @@ export default function CaptionPage() {
         document.execCommand('copy');
         document.body.removeChild(ta);
       }
-      setHint('复制成功');
+      setHint(okMsg || '复制成功！✅');
       setTimeout(() => setHint(''), 3000);
     } catch (e) {
       setHint('复制失败');
@@ -754,7 +754,7 @@ export default function CaptionPage() {
                           padding:'10px 12px', border:'1px solid var(--border)', borderRadius:10, fontSize:14,
                           cursor:'pointer'
                         }}
-                        onClick={() => { setMoreOpen(false); handleCopy(display); }}
+                        onClick={() => { setMoreOpen(false); handleCopy(display, '复制文案成功！✅'); }}
                       >
                         复制文案
                       </motion.button>
