@@ -143,6 +143,22 @@ export default function CaptionPage() {
     } catch {}
   }, []);
 
+  // Restore session (captions/images/indexes) when returning from external apps
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('caption:session');
+      if (!raw) return;
+      const snap = JSON.parse(raw);
+      if (Array.isArray(snap?.captions)) setCaptions(snap.captions);
+      if (typeof snap?.idx === 'number') setIdx(Math.max(0, Math.min(Number(snap.idx) || 0, (snap.captions?.length||1)-1)));
+      if (Array.isArray(snap?.images)) setImages(snap.images);
+      if (typeof snap?.imgIdx === 'number') setImgIdx(Math.max(0, Math.min(Number(snap.imgIdx) || 0, (snap.images?.length||1)-1)));
+      if (typeof snap?.product === 'string') setProduct(snap.product);
+      if (typeof snap?.platform === 'string') setPlatform(snap.platform);
+      if (typeof snap?.styleZh === 'string') setStyleZh(snap.styleZh);
+    } catch {}
+  }, []);
+
   useEffect(() => {
     try {
       localStorage.setItem('caption:prefs', JSON.stringify({ product, platform, styleZh }));
@@ -477,6 +493,10 @@ export default function CaptionPage() {
         }
       } catch {}
 
+      // Persist current session before leaving the page
+      try {
+        sessionStorage.setItem('caption:session', JSON.stringify({ captions, idx, images, imgIdx, product, platform, styleZh }));
+      } catch {}
       const shareUrl = `https://m.facebook.com/sharer.php?u=${encodeURIComponent(absoluteUrl)}&quote=${encodeURIComponent(message)}`;
       try {
         window.location.href = shareUrl; // 使用当前页跳转，避免返回后空白页
@@ -504,6 +524,10 @@ export default function CaptionPage() {
     } catch {}
 
     try {
+      // Persist current session before leaving the page
+      try {
+        sessionStorage.setItem('caption:session', JSON.stringify({ captions, idx, images, imgIdx, product, platform, styleZh }));
+      } catch {}
       window.location.href = 'https://m.facebook.com/'; // 当前页跳转，避免空白页
     } catch {
       setHint('分享失败');
