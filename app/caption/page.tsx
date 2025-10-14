@@ -474,7 +474,8 @@ export default function CaptionPage() {
     // If a URL is provided, open Facebook sharer with the link and quote
     if (url) {
       // 先复制“文案+链接”，再打开 Facebook 分享页
-      const combined = [message, `\n\n${url}`].filter(Boolean).join('\n');
+      const absoluteUrl = /^https?:\/\//i.test(url) ? url : new URL(url, window.location.origin).toString();
+      const combined = [message, `\n\n${absoluteUrl}`].filter(Boolean).join('\n');
       try {
         if (window.isSecureContext && navigator.clipboard?.writeText) {
           await navigator.clipboard.writeText(combined);
@@ -490,11 +491,9 @@ export default function CaptionPage() {
         }
       } catch {}
 
-      const shareUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}&quote=${encodeURIComponent(message)}`;
+      const shareUrl = `https://m.facebook.com/sharer.php?u=${encodeURIComponent(absoluteUrl)}&quote=${encodeURIComponent(message)}`;
       try {
-        window.open(shareUrl, '_blank', 'noopener,noreferrer');
-        setHint('已打开 Facebook 分享 ✅');
-        setTimeout(() => setHint(''), 2000);
+        window.location.href = shareUrl; // 使用当前页跳转，避免返回后空白页
       } catch {
         setHint('无法打开 Facebook 分享');
         setTimeout(() => setHint(''), 2000);
@@ -519,9 +518,7 @@ export default function CaptionPage() {
     } catch {}
 
     try {
-      window.open('https://www.facebook.com/', '_blank', 'noopener,noreferrer');
-      setHint('已复制，打开 Facebook 后请粘贴 ✅');
-      setTimeout(() => setHint(''), 2000);
+      window.location.href = 'https://m.facebook.com/'; // 当前页跳转，避免空白页
     } catch {
       setHint('分享失败');
       setTimeout(() => setHint(''), 2000);
