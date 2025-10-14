@@ -437,24 +437,7 @@ export default function CaptionPage() {
     }
   }
 
-  async function handleDownloadText(text: string) {
-    try {
-      const blob = new Blob([text ?? ''], { type: 'text/plain;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'caption.txt';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      setHint('已下载文案 ✅');
-      setTimeout(() => setHint(''), 2000);
-    } catch (e) {
-      setHint('下载文案失败');
-      setTimeout(() => setHint(''), 2000);
-    }
-  }
+  // 删除下载文案，改为复制文案
 
   async function handleCopyFullPost(text: string, url?: string) {
     const full = [text.trim(), url ? `\n\n${url}` : ''].filter(Boolean).join('\n');
@@ -465,9 +448,20 @@ export default function CaptionPage() {
 
   async function handleCopy(text: string) {
     try {
-      await navigator.clipboard.writeText(text);
-      setHint('已复制到剪贴板 ✅');
-      setTimeout(() => setHint(''), 2000);
+      if (window.isSecureContext && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text ?? '';
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setHint('复制成功');
+      setTimeout(() => setHint(''), 3000);
     } catch (e) {
       setHint('复制失败');
       setTimeout(() => setHint(''), 2000);
@@ -479,6 +473,23 @@ export default function CaptionPage() {
 
     // If a URL is provided, open Facebook sharer with the link and quote
     if (url) {
+      // 先复制“文案+链接”，再打开 Facebook 分享页
+      const combined = [message, `\n\n${url}`].filter(Boolean).join('\n');
+      try {
+        if (window.isSecureContext && navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(combined);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = combined;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+      } catch {}
+
       const shareUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}&quote=${encodeURIComponent(message)}`;
       try {
         window.open(shareUrl, '_blank', 'noopener,noreferrer');
@@ -760,9 +771,9 @@ export default function CaptionPage() {
                           padding:'10px 12px', border:'1px solid var(--border)', borderRadius:10, fontSize:14,
                           cursor:'pointer'
                         }}
-                        onClick={() => { setMoreOpen(false); handleDownloadText(display); }}
+                        onClick={() => { setMoreOpen(false); handleCopy(display); }}
                       >
-                        下载文案
+                        复制文案
                       </motion.button>
                       <div style={{ height:8 }} />
                       <motion.button
@@ -802,25 +813,32 @@ export default function CaptionPage() {
 
         {/* Image Results merged into combined card above */}
 
-        {/* Status Message */}
+        {/* Status Message / Toast */}
         <AnimatePresence>
           {hint && (
             <motion.div
-              style={{
-                ...hintStyle,
-                color: hint.includes('失败') ? '#dc2626' : 'var(--success)',
-                fontWeight: hint.includes('失败') ? '600' : 'normal',
-                backgroundColor: hint.includes('失败') ? '#fef2f2' : 'transparent',
-                padding: hint.includes('失败') ? '12px 16px' : '0',
-                borderRadius: hint.includes('失败') ? '8px' : '0',
-                border: hint.includes('失败') ? '1px solid #fecaca' : 'none',
-              }}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.22 }}
+              style={{ position: 'fixed', left: 0, right: 0, top: '35%', display: 'flex', justifyContent: 'center', zIndex: 50 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
             >
-              {hint}
+              <div
+                style={{
+                  maxWidth: 420,
+                  margin: '0 16px',
+                  padding: '12px 14px',
+                  borderRadius: 12,
+                  border: '1px solid var(--border)',
+                  boxShadow: '0 8px 24px rgba(0,0,0,.12)',
+                  background: 'var(--bg-card)',
+                  color: hint.includes('失败') ? '#dc2626' : 'var(--text)',
+                  fontWeight: 600,
+                  textAlign: 'center',
+                }}
+              >
+                {hint}
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
