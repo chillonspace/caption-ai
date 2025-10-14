@@ -142,6 +142,22 @@ export async function POST(req: NextRequest) {
     const seed = String(body?.seed || Math.floor(Math.random() * 9999999).toString()).trim();
     const aspect = (aspectRaw === '9:16' ? '9:16' : aspectRaw === '1:1' ? '1:1' : '4:5') as Aspect;
     const { width, height } = mapAspect(aspect);
+
+    // Temporary placeholder mode: skip AI and return default image
+    const PLACEHOLDER_MODE = (process.env.IMAGE_GEN_PLACEHOLDER ?? '1');
+    if (PLACEHOLDER_MODE === '1' || PLACEHOLDER_MODE === 'true') {
+      const assetPath = (PRODUCT_ASSETS as any)?.[product as keyof typeof PRODUCT_ASSETS] || '/products/airvo.png';
+      return NextResponse.json(
+        {
+          image_url: assetPath,
+          thumb_path: assetPath,
+          aspect: '4:5',
+          provider: 'placeholder',
+          used_prompt: 'placeholder',
+        },
+        { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } }
+      );
+    }
     // Style selection: use fixed pool if not provided
     const styleKeys = Object.keys(AD_STYLES);
     const adStyleKey = adStyle || styleKeys[Math.floor(Math.random() * styleKeys.length)];
