@@ -386,14 +386,10 @@ export default function CaptionPage() {
     }
     setImgLoading(true);
     try {
-      const res = await fetch('/api/generate-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          product,
-          caption: optionalCaption ?? display,
-          style: styleZh,
-        }),
+      const qs = new URLSearchParams({ product });
+      const res = await fetch(`/api/generate-image?${qs.toString()}`, {
+        method: 'GET',
+        headers: { 'Cache-Control': 'no-store' },
       });
       if (!res.ok) {
         const errorText = await res.text();
