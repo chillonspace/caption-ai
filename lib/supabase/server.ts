@@ -13,14 +13,23 @@ export function createServer() {
       },
       async set(name: string, value: string, options: any) {
         const store = await cookieStore as any;
-        if (typeof store?.set === 'function') {
-          store.set({ name, value, ...options });
+        try {
+          if (typeof store?.set === 'function') {
+            store.set({ name, value, ...options });
+          }
+        } catch {
+          // In React Server Components, cookies cannot be modified.
+          // Silently ignore to avoid crashing during SSR auth checks.
         }
       },
       async remove(name: string, options: any) {
         const store = await cookieStore as any;
-        if (typeof store?.set === 'function') {
-          store.set({ name, value: '', ...options });
+        try {
+          if (typeof store?.set === 'function') {
+            store.set({ name, value: '', ...options });
+          }
+        } catch {
+          // See note in set(): ignore in RSC to prevent fatal error
         }
       },
     },
