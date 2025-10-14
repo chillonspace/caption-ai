@@ -1,22 +1,22 @@
 {
-  "samples": 27,
-  "sum_prompt_tokens": 74330,
-  "sum_completion_tokens": 3697,
-  "sum_total_tokens": 78027,
+  "samples": 28,
+  "sum_prompt_tokens": 77082,
+  "sum_completion_tokens": 3834,
+  "sum_total_tokens": 80916,
   "sum_cost_usd": 0,
   "by_model": {
     "deepseek-chat": {
-      "samples": 27,
-      "sum_prompt_tokens": 74330,
-      "sum_completion_tokens": 3697,
-      "sum_total_tokens": 78027,
+      "samples": 28,
+      "sum_prompt_tokens": 77082,
+      "sum_completion_tokens": 3834,
+      "sum_total_tokens": 80916,
       "sum_cost_usd": 0
     }
   },
   "by_user": {
     "chillon2828@gmail.com": {
-      "samples": 27,
-      "sum_total_tokens": 78027,
+      "samples": 28,
+      "sum_total_tokens": 80916,
       "sum_cost_usd": 0
     }
   }

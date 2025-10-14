@@ -165,7 +165,8 @@ export async function POST(req: NextRequest) {
         const body = {
           model: 'cogview-4',
           prompt: `${prompt}\n产品必须保持原样，不可重绘。生成中文广告海报，添加中文标题与卖点，干净高质感背景。`,
-          size: '1080x1350',
+          // Use 16-multiple size to satisfy provider constraints; later we crop to 1080x1350
+          size: '1088x1360',
           seed: seed || Math.floor(Math.random() * 999999).toString(),
         } as const;
         const res = await fetch('https://open.bigmodel.cn/api/paas/v4/images/generations', {
