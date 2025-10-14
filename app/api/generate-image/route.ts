@@ -73,6 +73,29 @@ function placeholderUrl(width: number, height: number, seed?: string) {
 
 export async function POST(req: NextRequest) {
   try {
+    // Placeholder mode: always return product/default image without auth/AI
+    {
+      const PLACEHOLDER_MODE = (process.env.IMAGE_GEN_PLACEHOLDER ?? '1');
+      if (PLACEHOLDER_MODE === '1' || PLACEHOLDER_MODE === 'true') {
+        let product = '';
+        try {
+          const bodyAny: any = await req.json();
+          product = String(bodyAny?.product || '').trim();
+        } catch {}
+        const assetPath = (PRODUCT_ASSETS as any)?.[product as keyof typeof PRODUCT_ASSETS] || '/products/airvo.png';
+        return NextResponse.json(
+          {
+            image_url: assetPath,
+            thumb_path: assetPath,
+            aspect: '4:5',
+            provider: 'placeholder',
+            used_prompt: 'placeholder',
+          },
+          { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } }
+        );
+      }
+    }
+
     // 登录校验
     try {
       const sb = createServer();
@@ -143,21 +166,7 @@ export async function POST(req: NextRequest) {
     const aspect = (aspectRaw === '9:16' ? '9:16' : aspectRaw === '1:1' ? '1:1' : '4:5') as Aspect;
     const { width, height } = mapAspect(aspect);
 
-    // Temporary placeholder mode: skip AI and return default image
-    const PLACEHOLDER_MODE = (process.env.IMAGE_GEN_PLACEHOLDER ?? '1');
-    if (PLACEHOLDER_MODE === '1' || PLACEHOLDER_MODE === 'true') {
-      const assetPath = (PRODUCT_ASSETS as any)?.[product as keyof typeof PRODUCT_ASSETS] || '/products/airvo.png';
-      return NextResponse.json(
-        {
-          image_url: assetPath,
-          thumb_path: assetPath,
-          aspect: '4:5',
-          provider: 'placeholder',
-          used_prompt: 'placeholder',
-        },
-        { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } }
-      );
-    }
+    // (non-placeholder mode continues)
     // Style selection: use fixed pool if not provided
     const styleKeys = Object.keys(AD_STYLES);
     const adStyleKey = adStyle || styleKeys[Math.floor(Math.random() * styleKeys.length)];
@@ -342,10 +351,17 @@ export async function OPTIONS() {
 
 export async function GET(req: NextRequest) {
   try {
-    return NextResponse.json(
-      { ok: true, message: 'Use POST to generate image' },
-      { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } }
-    );
+    const PLACEHOLDER_MODE = (process.env.IMAGE_GEN_PLACEHOLDER ?? '1');
+    if (PLACEHOLDER_MODE === '1' || PLACEHOLDER_MODE === 'true') {
+      const url = new URL(req.url);
+      const product = String(url.searchParams.get('product') || '').trim();
+      const assetPath = (PRODUCT_ASSETS as any)?.[product as keyof typeof PRODUCT_ASSETS] || '/products/airvo.png';
+      return NextResponse.json(
+        { image_url: assetPath, thumb_path: assetPath, aspect: '4:5', provider: 'placeholder' },
+        { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } }
+      );
+    }
+    return NextResponse.json({ ok: true, message: 'Use POST to generate image' }, { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } });
   } catch (err: unknown) {
     return NextResponse.json(
       { error: 'Request failed', detail: (err as Error)?.message ?? String(err) },
