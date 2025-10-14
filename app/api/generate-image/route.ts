@@ -83,10 +83,12 @@ export async function POST(req: NextRequest) {
           product = String(bodyAny?.product || '').trim();
         } catch {}
         const assetPath = (PRODUCT_ASSETS as any)?.[product as keyof typeof PRODUCT_ASSETS] || '/products/airvo.png';
+        const origin = req.nextUrl.origin;
+        const abs = assetPath.startsWith('http') ? assetPath : `${origin}${assetPath}`;
         return NextResponse.json(
           {
-            image_url: assetPath,
-            thumb_path: assetPath,
+            image_url: abs,
+            thumb_path: abs,
             aspect: '4:5',
             provider: 'placeholder',
             used_prompt: 'placeholder',
@@ -356,8 +358,10 @@ export async function GET(req: NextRequest) {
       const url = new URL(req.url);
       const product = String(url.searchParams.get('product') || '').trim();
       const assetPath = (PRODUCT_ASSETS as any)?.[product as keyof typeof PRODUCT_ASSETS] || '/products/airvo.png';
+      const origin = req.nextUrl.origin;
+      const abs = assetPath.startsWith('http') ? assetPath : `${origin}${assetPath}`;
       return NextResponse.json(
-        { image_url: assetPath, thumb_path: assetPath, aspect: '4:5', provider: 'placeholder' },
+        { image_url: abs, thumb_path: abs, aspect: '4:5', provider: 'placeholder' },
         { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } }
       );
     }
