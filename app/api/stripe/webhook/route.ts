@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { getEnv, setUserActiveByEmail } from '@/lib/admin-utils';
+import { getEnv, setUserActiveByEmail, createAdminClient, findUserByEmail } from '@/lib/admin-utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -66,14 +66,48 @@ export async function POST(req: NextRequest) {
   const type = event.type;
   let shouldActivate: boolean | null = null;
 
+  // Derive email first (used for trial rule)
+  let email = await getEmailFromStripe(stripe, event);
+
+  // Read trial_used flag from our DB (Supabase app_metadata)
+  let trialUsed = false;
+  let userIdToUpdate: string | null = null;
+  try {
+    if (email) {
+      const u: any = await findUserByEmail(email);
+      if (u) {
+        userIdToUpdate = u.id as string;
+        trialUsed = Boolean((u.app_metadata || {}).trial_used);
+      }
+    }
+  } catch {}
+
+  // Decide activation with trial rule
   if (type === 'checkout.session.completed') {
-    shouldActivate = true;
+    // Only auto-activate on checkout completion when user hasn't used trial
+    shouldActivate = trialUsed ? false : true;
   } else if (type === 'customer.subscription.created' || type === 'customer.subscription.updated') {
-    // activate when status is trialing or active
     const obj: any = event.data.object as any;
     const status = (obj?.status || '').toString();
-    if (status === 'trialing' || status === 'active') shouldActivate = true;
-    if (status === 'canceled' || status === 'unpaid' || status === 'incomplete_expired') shouldActivate = false;
+    if (status === 'trialing') {
+      // First-time trial: allow and mark as used; otherwise do not activate
+      if (trialUsed) {
+        shouldActivate = false;
+      } else {
+        shouldActivate = true;
+        try {
+          if (userIdToUpdate) {
+            const admin = createAdminClient();
+            const newMeta = { trial_used: true } as any;
+            await admin.auth.admin.updateUserById(userIdToUpdate, { app_metadata: newMeta });
+          }
+        } catch {}
+      }
+    } else if (status === 'active') {
+      shouldActivate = true;
+    } else if (status === 'canceled' || status === 'unpaid' || status === 'incomplete_expired') {
+      shouldActivate = false;
+    }
   } else if (type === 'customer.subscription.deleted') {
     shouldActivate = false;
   } else if (type === 'invoice.payment_succeeded') {
@@ -87,8 +121,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ received: true, ignored: true });
   }
 
-  // derive email from event, with optional override for testing
-  let email = await getEmailFromStripe(stripe, event);
+  // derive email from event (already resolved above), with optional override for testing
   try {
     const enableOverride = String(process.env.ENABLE_WEBHOOK_OVERRIDE || '').toLowerCase() === 'true';
     if (enableOverride) {
