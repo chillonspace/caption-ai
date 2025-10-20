@@ -888,6 +888,18 @@ export default function CaptionPage() {
                   <option value="en">🇬🇧 English</option>
                 </select>
                 <button className="menu-item" onClick={handleManageSubscription}>管理订阅/账单</button>
+                <button className="menu-item" onClick={async () => {
+                  try {
+                    const res = await fetch('/api/stripe/cancel', { method: 'POST' });
+                    const json = await res.json();
+                    if (!res.ok) throw new Error(String(json?.error || `HTTP ${res.status}`));
+                    setHint(String(json?.message || '已提交取消'));
+                    setTimeout(() => setHint(''), 3000);
+                  } catch (e) {
+                    setHint((e as Error)?.message || '取消失败');
+                    setTimeout(() => setHint(''), 3000);
+                  }
+                }}>取消订阅</button>
                 <button className="menu-item" onClick={handleSignOut}>退出登录</button>
               </div>
             </motion.aside>

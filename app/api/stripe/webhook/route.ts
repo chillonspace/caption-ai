@@ -157,6 +157,26 @@ export async function POST(req: NextRequest) {
   if (!res.ok) {
     return NextResponse.json({ received: true, updated: false, reason: res.reason });
   }
+
+  // On first-time activation, persist subscribed_at and min_cancel_date (+3 months)
+  try {
+    if (shouldActivate === true && userIdToUpdate) {
+      const admin = createAdminClient();
+      // Read again to avoid overwriting existing metadata
+      const u = await admin.auth.admin.getUserById(userIdToUpdate);
+      const meta: any = (u.data?.user?.app_metadata || {});
+      if (!meta.subscribed_at) {
+        const threeMonthsSec = 3 * 30 * 24 * 60 * 60; // approximate 3 months
+        const payload: any = {
+          subscribed_at: nowSec,
+          min_cancel_date: nowSec + threeMonthsSec,
+          trial_started_at: meta.trial_started_at ?? trialStartedAtSec ?? nowSec,
+          trial_used: true,
+        };
+        await admin.auth.admin.updateUserById(userIdToUpdate, { app_metadata: payload });
+      }
+    }
+  } catch {}
   return NextResponse.json({ received: true, updated: true });
 }
 
