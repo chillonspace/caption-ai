@@ -25,13 +25,14 @@ export async function POST(req: NextRequest) {
 
     const stripe = new Stripe(getEnv('STRIPE_SECRET_KEY'));
 
-    // Find customer's active subscription by email
+    // Find customer's latest cancellable subscription by email (support trialing/active...)
     const custs = await stripe.customers.list({ email: user.email, limit: 1 });
     const cust = custs.data?.[0];
-    if (!cust) return NextResponse.json({ error: 'Stripe customer not found' }, { status: 404 });
-    const subs = await stripe.subscriptions.list({ customer: cust.id, status: 'active', limit: 1 });
-    const sub = subs.data?.[0];
-    if (!sub) return NextResponse.json({ error: 'Active subscription not found' }, { status: 404 });
+    if (!cust) return NextResponse.json({ error: '未找到对应的 Stripe 账户，请确认登录邮箱' }, { status: 404 });
+    const subsAll = await stripe.subscriptions.list({ customer: cust.id, status: 'all', limit: 10 });
+    const candidates = subsAll.data.filter(s => ['trialing','active','past_due','unpaid'].includes(String(s.status)));
+    const sub = candidates[0];
+    if (!sub) return NextResponse.json({ error: '当前没有可取消的订阅（可能尚未创建或已安排取消）' }, { status: 404 });
 
     await stripe.subscriptions.update(sub.id, { cancel_at_period_end: true });
     return NextResponse.json({ allowed: true, message: '已提交取消，本账期结束后生效' });
