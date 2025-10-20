@@ -69,8 +69,9 @@ export async function POST(req: NextRequest) {
   // Derive email first (used for trial rule)
   let email = await getEmailFromStripe(stripe, event);
 
-  // Read trial_used flag from our DB (Supabase app_metadata)
+  // Read trial flags from our DB (Supabase app_metadata)
   let trialUsed = false;
+  let trialStartedAtSec: number | null = null; // unix seconds
   let userIdToUpdate: string | null = null;
   try {
     if (email) {
@@ -78,38 +79,52 @@ export async function POST(req: NextRequest) {
       if (u) {
         userIdToUpdate = u.id as string;
         trialUsed = Boolean((u.app_metadata || {}).trial_used);
+        const tsa = (u.app_metadata || {}).trial_started_at;
+        if (typeof tsa === 'number') trialStartedAtSec = tsa;
       }
     }
   } catch {}
 
+  // Compute 14-day window based on first subscription time
+  const TRIAL_DAYS = 14;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const inWindow = trialStartedAtSec != null && nowSec < (trialStartedAtSec + TRIAL_DAYS * 24 * 60 * 60);
+
   // Decide activation with trial rule
   if (type === 'checkout.session.completed') {
-    // Only auto-activate on checkout completion when user hasn't used trial
-    shouldActivate = trialUsed ? false : true;
+    // First subscription checkout completes → start trial window if not set
+    if (!trialStartedAtSec && userIdToUpdate) {
+      try {
+        const admin = createAdminClient();
+        await admin.auth.admin.updateUserById(userIdToUpdate, { app_metadata: { trial_started_at: nowSec, trial_used: true } });
+        trialStartedAtSec = nowSec;
+      } catch {}
+    }
+    // Within 14-day window → activate；otherwise wait for payment success
+    shouldActivate = (trialStartedAtSec && (nowSec < trialStartedAtSec + TRIAL_DAYS * 24 * 60 * 60)) ? true : false;
   } else if (type === 'customer.subscription.created' || type === 'customer.subscription.updated') {
     const obj: any = event.data.object as any;
     const status = (obj?.status || '').toString();
+    if (!trialStartedAtSec && (status === 'trialing' || status === 'active') && userIdToUpdate) {
+      // First time we see a subscription → start trial window
+      try {
+        const admin = createAdminClient();
+        await admin.auth.admin.updateUserById(userIdToUpdate, { app_metadata: { trial_started_at: nowSec, trial_used: true } });
+        trialStartedAtSec = nowSec;
+      } catch {}
+    }
     if (status === 'trialing') {
-      // First-time trial: allow and mark as used; otherwise do not activate
-      if (trialUsed) {
-        shouldActivate = false;
-      } else {
-        shouldActivate = true;
-        try {
-          if (userIdToUpdate) {
-            const admin = createAdminClient();
-            const newMeta = { trial_used: true } as any;
-            await admin.auth.admin.updateUserById(userIdToUpdate, { app_metadata: newMeta });
-          }
-        } catch {}
-      }
+      // Activate during the window; otherwise do not auto-activate
+      shouldActivate = (trialStartedAtSec && (nowSec < trialStartedAtSec + TRIAL_DAYS * 24 * 60 * 60)) ? true : false;
     } else if (status === 'active') {
       shouldActivate = true;
     } else if (status === 'canceled' || status === 'unpaid' || status === 'incomplete_expired') {
-      shouldActivate = false;
+      // If inside trial window, keep active; else disable
+      shouldActivate = (trialStartedAtSec && (nowSec < trialStartedAtSec + TRIAL_DAYS * 24 * 60 * 60)) ? true : false;
     }
   } else if (type === 'customer.subscription.deleted') {
-    shouldActivate = false;
+    // If inside trial window, keep active; else disable
+    shouldActivate = (trialStartedAtSec && (nowSec < trialStartedAtSec + TRIAL_DAYS * 24 * 60 * 60)) ? true : false;
   } else if (type === 'invoice.payment_succeeded') {
     shouldActivate = true;
   } else if (type === 'invoice.payment_failed') {
